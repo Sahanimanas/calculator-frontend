@@ -12,6 +12,15 @@ const PageHeader = ({ heading, subHeading }) => (
 // *** IMPORTANT: Update this string with your actual API base URL. ***
 const apiBaseUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ++ NEW: Reusable Loader Component
+const Loader = ({ message = "Loading..." }) => (
+  <div className="flex flex-col items-center justify-center p-6">
+    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+    <p className="mt-3 text-sm font-medium text-gray-700">{message}</p>
+  </div>
+);
+
+
 const Costing = () => {
   // State for managing filters, data, and UI
   const [projectsData, setProjectsData] = useState([]);
@@ -36,6 +45,7 @@ const Costing = () => {
   const [editingResource, setEditingResource] = useState(null);
   const [productivityRatesMap, setProductivityRatesMap] = useState({});
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false); // ++ NEW: State for modal loader
 
   // --- API & DATA HANDLING ---
 
@@ -63,8 +73,7 @@ const Costing = () => {
     };
     fetchProjects();
   }, []);
-
-  const fetchBillingData = useCallback(async () => {
+     const fetchBillingData = useCallback(async () => {
     const { project, subProject, month, year } = filters;
 
     if (projectsData.length === 0 || subprojects.length === 0) {
@@ -116,7 +125,6 @@ const Costing = () => {
         if (!currentMonthBillingRes.ok) throw new Error('Could not fetch current month billing records.');
         const currentMonthBillingRecords = await currentMonthBillingRes.json();
 
-        // FIX: Corrected typo 'apiBaseBaseUrl' to 'apiBaseUrl'
         const nullMonthBillingRes = await fetch(`${apiBaseUrl}/billing?month=null`);
         if (!nullMonthBillingRes.ok) throw new Error('Could not fetch initial billing records.');
         const nullMonthBillingRecords = await nullMonthBillingRes.json();
@@ -141,13 +149,11 @@ const Costing = () => {
         const finalDataMap = new Map();
 
         // Pass 1: Active Assignments (Current Resources)
-        // Only iterates over EXISTING resources
         allResources.forEach(resource => {
           (resource.assigned_subprojects || []).forEach(assignedSubproject => {
 
-            // NEW LOGIC: Use the flattened list for reliable subproject info
             const subProjectInfo = allSubprojectsFlat.find(sp => sp._id === assignedSubproject._id);
-            if (!subProjectInfo) return; // Skip if subproject info is missing
+            if (!subProjectInfo) return; 
 
             const projectInfo = projectsData.find(p => p._id === subProjectInfo.projectId);
             if (!projectInfo) return;
@@ -157,18 +163,21 @@ const Costing = () => {
 
             const billing = billingRecordsMap.get(uniqueKey);
             const ratesForSubproject = ratesMap[subprojectId] || [];
-
             let rowData;
             const defaultProductivity = 'Medium';
             const rateRecord = ratesForSubproject.find(r => r.level.toLowerCase() === defaultProductivity.toLowerCase());
 
             if (billing) {
+              const currentRate = ratesForSubproject.find(
+                r => r.level.toLowerCase() === billing.productivity_level.toLowerCase()
+              )?.base_rate || 0;
               rowData = {
                 ...resource,
                 billingId: billing._id,
+                isMonthlyRecord: billing.month !== null, // ++ FIX: Track if this is a real record
                 hours: billing.hours,
-                rate: billing.rate,
-                flatrate: subProjectInfo.flatrate ?? 0, // <-- FIX: Use Subproject flatrate
+                rate: currentRate,
+                flatrate: subProjectInfo.flatrate ?? 0,
                 productivity: billing.productivity_level,
                 description: billing.description || '',
                 isBillable: billing.billable_status === 'Billable'
@@ -177,9 +186,10 @@ const Costing = () => {
               rowData = {
                 ...resource,
                 billingId: null,
+                isMonthlyRecord: false, // ++ FIX: This is not a real record
                 hours: 0,
                 rate: rateRecord?.base_rate ?? 0,
-                flatrate: subProjectInfo.flatrate ?? 0, // <-- FIX: Use Subproject flatrate
+                flatrate: subProjectInfo.flatrate ?? 0,
                 productivity: defaultProductivity,
                 description: '',
                 isBillable: true
@@ -203,28 +213,25 @@ const Costing = () => {
           const subprojectId = billing.subproject_id?._id || billing.subproject_id;
           const uniqueKey = `${subprojectId}-${billing.resource_id}`;
 
-          // 1. Skip if already handled by an active assignment (Pass 1)
           if (finalDataMap.has(uniqueKey)) return;
-
-          // 2. Only show records that were explicitly billed (month != null).
           if (billing.month === null) return;
 
-          // 3. Find resource info
           const resourceInfo = allResourcesMap.get(billing.resource_id);
-
-          // Fetch Project/Subproject info (required for display regardless of resource status)
-          // Find the subproject using the flattened list for reliable data
           const subProjectInfo = allSubprojectsFlat.find(sp => sp._id === subprojectId);
           const projectInfo = subProjectInfo ? projectsData.find(p => p._id === subProjectInfo.projectId) : null;
+          
+          const ratesForSubproject = ratesMap[subprojectId] || [];
+          billing.rate = ratesForSubproject.find(r => r.level.toLowerCase() === billing.productivity_level.toLowerCase())?.base_rate || 0;
 
           if (!projectInfo || !subProjectInfo) return;
 
           const baseRecord = {
             uniqueId: `${projectInfo._id}-${subprojectId}-${billing.resource_id}`,
             billingId: billing._id,
+            isMonthlyRecord: billing.month !== null, // ++ FIX: Track if this is a real record
             hours: billing.hours,
             rate: billing.rate,
-            flatrate: subProjectInfo.flatrate ?? 0, // <-- FIX: Use Subproject flatrate
+            flatrate: subProjectInfo.flatrate ?? 0,
             productivity: billing.productivity_level,
             description: billing.description || '',
             isBillable: billing.billable_status === 'Billable',
@@ -232,19 +239,17 @@ const Costing = () => {
             subProjectName: subProjectInfo.name,
             projectId: projectInfo._id,
             subprojectId: subprojectId,
-            isEditable: false // Historical records are always non-editable
+            isEditable: false
           };
 
           if (!resourceInfo) {
-            // DELETED Resource (Orphaned Record) - Use denormalized data
             finalDataMap.set(uniqueKey, {
               ...baseRecord,
               name: billing.resource_name || `Deleted Resource (${billing.resource_id})`,
-              avatar_url: 'https://placehold.co/40x40/f3f4f6/374151?text=DLT', // Placeholder avatar
+              avatar_url: 'https://placehold.co/40x40/f3f4f6/374151?text=DLT',
               role: 'N/A',
             });
           } else {
-            // Existing but Unassigned Resource (Historical Record)
             finalDataMap.set(uniqueKey, {
               ...resourceInfo,
               ...baseRecord
@@ -277,7 +282,6 @@ const Costing = () => {
         if (!productivityRes.ok) throw new Error('Could not fetch productivity rates.');
         if (!resourcesRes.ok) throw new Error('Could not fetch resources.');
 
-        // NEW LOGIC: Find the specific subproject's flatrate
         let subProjectFlatRate = 0;
         const selectedProjectContainer = subprojects.find(p => p._id === project);
         const selectedSubProject = selectedProjectContainer?.subprojects.find(sp => sp._id === subProject);
@@ -285,7 +289,6 @@ const Costing = () => {
         if (selectedSubProject) {
           subProjectFlatRate = selectedSubProject.flatrate ?? 0;
         }
-        // END NEW LOGIC
 
         const ratesData = await productivityRes.json();
         const allResources = await resourcesRes.json();
@@ -294,7 +297,6 @@ const Costing = () => {
 
         const linkedResources = allResources.filter(r => (r.assigned_subprojects || []).some(sp => sp._id === subProject));
 
-        // Fetch billing records for the specific month/year AND the initial null month records for this subproject
         const monthlyParams = new URLSearchParams({ subproject_id: subProject, month, year });
         const nullMonthParams = new URLSearchParams({ subproject_id: subProject, month: 'null' });
 
@@ -308,7 +310,6 @@ const Costing = () => {
         const monthlyBillingRecords = await monthlyBillingRes.json();
         const nullMonthBillingRecords = await nullMonthBillingRes.json();
 
-        // Combine records, prioritizing monthly records
         const billingRecordsMap = new Map();
         monthlyBillingRecords.forEach(billing => billingRecordsMap.set(billing.resource_id, billing));
         nullMonthBillingRecords.forEach(billing => {
@@ -328,12 +329,16 @@ const Costing = () => {
           const rateRecord = ratesData.find(r => r.level.toLowerCase() === defaultProductivity.toLowerCase());
 
           if (billing) {
+            const currentRate = ratesData.find(
+              r => r.level.toLowerCase() === billing.productivity_level.toLowerCase()
+            )?.base_rate || 0;
             rowData = {
               ...resource,
               billingId: billing._id,
+              isMonthlyRecord: billing.month !== null, // ++ FIX: Track if this is a real record
               hours: billing.hours,
-              rate: billing.rate, // Internal Cost Rate
-              flatrate: subProjectFlatRate, // <-- Use Subproject flatrate variable
+              rate: currentRate,
+              flatrate: subProjectFlatRate,
               productivity: billing.productivity_level,
               description: billing.description || '',
               isBillable: billing.billable_status === 'Billable'
@@ -342,9 +347,10 @@ const Costing = () => {
             rowData = {
               ...resource,
               billingId: null,
+              isMonthlyRecord: false, // ++ FIX: This is not a real record
               hours: 0,
-              rate: rateRecord?.base_rate ?? 0, // Default Internal Cost Rate
-              flatrate: subProjectFlatRate, // <-- Use Subproject flatrate variable
+              rate: rateRecord?.base_rate ?? 0,
+              flatrate: subProjectFlatRate,
               productivity: defaultProductivity,
               description: '',
               isBillable: true
@@ -356,18 +362,19 @@ const Costing = () => {
 
         // Pass 2: Historical/Orphaned Records (Non-Editable)
         monthlyBillingRecords.forEach(billing => {
-          // 1. Skip if already handled by an active assignment (Pass 1)
           if (finalDataMap.has(billing.resource_id)) return;
 
-          // 2. Resource info
           const resourceInfo = allResourcesMap.get(billing.resource_id);
-
+          const currentRate = ratesData.find(
+            r => r.level.toLowerCase() === billing.productivity_level.toLowerCase()
+          )?.base_rate || 0;
           const baseRecord = {
             uniqueId: `${project}-${subProject}-${billing.resource_id}`,
             billingId: billing._id,
+            isMonthlyRecord: billing.month !== null, // ++ FIX: Track if this is a real record
             hours: billing.hours,
-            rate: billing.rate, // Internal Cost Rate
-            flatrate: subProjectFlatRate, // <-- Use Subproject flatrate variable
+            rate:currentRate,
+            flatrate: subProjectFlatRate,
             productivity: billing.productivity_level,
             description: billing.description || '',
             isBillable: billing.billable_status === 'Billable',
@@ -377,15 +384,13 @@ const Costing = () => {
           };
 
           if (!resourceInfo) {
-            // DELETED Resource (Orphaned Record) - Use denormalized data
             finalDataMap.set(billing.resource_id, {
               ...baseRecord,
               name: billing.resource_name || `Deleted Resource (${billing.resource_id})`,
-              avatar_url: 'https://placehold.co/40x40/f3f4f6/374151?text=DLT', // Placeholder avatar
+              avatar_url: 'https://placehold.co/40x40/f3f4f6/374151?text=DLT',
               role: 'N/A',
             });
           } else {
-            // Existing but Unassigned Resource (Historical Record)
             finalDataMap.set(billing.resource_id, {
               ...resourceInfo,
               ...baseRecord
@@ -397,7 +402,8 @@ const Costing = () => {
         setResources(Array.from(finalDataMap.values()));
         setIsDataLoaded(true);
         showToast('Billing data loaded successfully!');
-      } catch (error) {
+      } catch (error)
+      {
         console.error("Error loading billing data:", error);
         showToast(error.message, 'error');
       } finally {
@@ -436,39 +442,35 @@ const Costing = () => {
   }, [filters.project, subprojects]);
 
   // Handler for changing resource hours, productivity, etc. inline
-  const handleResourceChange = async (uniqueId, field, value) => {
+   const handleResourceChange = async (uniqueId, field, value) => {
     let targetResource = resources.find(r => r.uniqueId === uniqueId);
     if (!targetResource) return;
 
     const originalResourceState = { ...targetResource };
     const currentRates = productivityRatesMap[targetResource.subprojectId] || [];
 
-    // Ensure numeric fields are correctly parsed as numbers
     let parsedValue = value;
     if (field === 'hours') {
       parsedValue = Number(value);
       if (isNaN(parsedValue)) {
-        parsedValue = 0; // Default to 0 if input is not a valid number
+        parsedValue = 0;
       }
     }
 
     let newRes = { ...targetResource, [field]: parsedValue };
 
-    // Update internal cost rate if productivity changes
     if (field === 'productivity') {
       const rateRecord = currentRates.find(r => r.level.toLowerCase() === value.toLowerCase());
       newRes.rate = rateRecord ? rateRecord.base_rate : 0;
     }
 
-    // Optimistically update the UI for a responsive feel
     const updatedResources = resources.map(res =>
       res.uniqueId === uniqueId ? newRes : res
     );
     setResources(updatedResources);
 
-    // Prepare payload for API
-    const totalAmount = Number(newRes.hours) * Number(newRes.flatrate); // Revenue: Subproject Flatrate * Hours
-    const costingAmount = Number(newRes.hours) * Number(newRes.rate); // Cost: Cost Rate * Hours
+    const totalAmount = Number(newRes.hours) * Number(newRes.flatrate);
+    const costingAmount = Number(newRes.hours) * Number(newRes.rate);
 
     const payload = {
       project_id: newRes.projectId,
@@ -476,10 +478,10 @@ const Costing = () => {
       resource_id: newRes._id,
       hours: Number(newRes.hours),
       productivity_level: newRes.productivity,
-      rate: Number(newRes.rate), // Internal Cost Rate
-      flatrate: Number(newRes.flatrate), // Subproject Flat Rate
-      costing: costingAmount, // New calculated field
-      total_amount: totalAmount, // New calculated field
+      rate: Number(newRes.rate),
+      flatrate: Number(newRes.flatrate),
+      costing: costingAmount,
+      total_amount: totalAmount,
       description: newRes.description,
       billable_status: newRes.isBillable ? 'Billable' : 'Non-Billable',
       month: filters.month,
@@ -488,7 +490,10 @@ const Costing = () => {
 
     try {
       let response, data;
-      if (newRes.billingId) {
+
+      // ++ FIX: PUT only if it's an existing monthly record.
+      // ++ POST if it's a new record (no billingId) OR based on a 'null' template.
+      if (newRes.billingId && newRes.isMonthlyRecord) {
         response = await fetch(`${apiBaseUrl}/billing/${newRes.billingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -505,18 +510,19 @@ const Costing = () => {
       data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Failed to save billing record');
 
-      // If it was a new record, update the state with the new billingId from the server
-      if (!newRes.billingId) {
+      // ++ FIX: If it was a POST, update state with new ID and set isMonthlyRecord to true
+      if (!newRes.billingId || !newRes.isMonthlyRecord) {
         setResources(currentResources => currentResources.map(res =>
-          res.uniqueId === uniqueId ? { ...res, billingId: data._id } : res
+          res.uniqueId === uniqueId ? { ...res, billingId: data._id, isMonthlyRecord: true } : res
         ));
       }
+      
       showToast('Billing record saved!');
-      await fetchBillingData(); // Re-fetch data to ensure UI is up-to-date
+      // Re-fetch to ensure complete sync, especially if it was a POST
+      await fetchBillingData(); 
     } catch (error) {
       console.error('Error saving resource change:', error);
       showToast(error.message, 'error');
-      // On failure, revert the specific resource that was being edited
       setResources(currentResources =>
         currentResources.map(res =>
           res.uniqueId === uniqueId ? originalResourceState : res
@@ -528,7 +534,7 @@ const Costing = () => {
 
   // Function to handle saving billing and generating an invoice
   const handleSaveBilling = () => {
-    const billableRecords = resources.filter(r => r.billingId && r.hours > 0 && r.isBillable);
+    const billableRecords = resources.filter(r => r.billingId && r.hours > 0);
     if (billableRecords.length === 0) {
       showToast("No billable hours to invoice for this period, or records haven't been saved yet.", "error");
       return;
@@ -536,19 +542,108 @@ const Costing = () => {
     setIsConfirmModalOpen(true);
   };
 
-  const handleConfirmInvoice = async () => {
-    const billingRecordIds = resources
-      .filter(r => r.billingId && r.hours > 0 && r.isBillable)
-      .map(r => r.billingId);
+const handleConfirmInvoice = async () => {
+    setIsGeneratingInvoice(true);
 
-    if (billingRecordIds.length === 0) {
-      showToast("No billable hours to invoice.", "error");
+    // 1. Get all resources currently loaded in the UI to process
+    const resourcesToProcess = resources;
+
+    if (resourcesToProcess.length === 0) {
+      showToast("No records found to update or invoice.", "error");
       setIsConfirmModalOpen(false);
+      setIsGeneratingInvoice(false);
       return;
     }
 
+    // 2. Create an array of update (PUT) or create (POST) promises
+    showToast("Syncing latest rates to all billing records...", "success");
+    
+    const syncPromises = resourcesToProcess.map(res => {
+      const totalAmount = Number(res.hours) * Number(res.flatrate); // Revenue
+      const costingAmount = Number(res.hours) * Number(res.rate);   // Cost
+
+      const payload = {
+        project_id: res.projectId,
+        subproject_id: res.subprojectId,
+        resource_id: res._id,
+        hours: Number(res.hours),
+        productivity_level: res.productivity,
+        rate: Number(res.rate),
+        flatrate: Number(res.flatrate),
+        costing: costingAmount,
+        total_amount: totalAmount,
+        description: res.description || '',
+        billable_status: res.isBillable ? 'Billable' : 'Non-Billable',
+        month: filters.month,
+        year: filters.year,
+      };
+
+      // ++ FIX: Use same logic as handleResourceChange
+      // PUT if it's an existing monthly record
+      if (res.billingId && res.isMonthlyRecord) {
+        return fetch(`${apiBaseUrl}/billing/${res.billingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).then(response => response.json().then(data => ({ response, data, originalResource: res, method: 'PUT' })));
+      } 
+      // POST if it's a new record or based on a template
+      else {
+        return fetch(`${apiBaseUrl}/billing`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).then(response => response.json().then(data => ({ response, data, originalResource: res, method: 'POST' })));
+      }
+    });
+
     try {
-      const response = await fetch(`${apiBaseUrl}/invoices`, {
+      // 3. Execute all syncs in parallel
+      const results = await Promise.all(syncPromises);
+
+      // 4. Check for failures and collect new/existing billing IDs
+      const newBillingIds = new Map();
+      let updatedResourcesForInvoice = [...resources];
+
+      for (const result of results) {
+        if (!result.response.ok) {
+          const errorData = result.data;
+          throw new Error(`Failed to sync record for ${result.originalResource.name}: ${errorData.message || 'Unknown error'}`);
+        }
+        
+        // If this was a POST, store the new ID
+        if (result.method === 'POST') {
+           newBillingIds.set(result.originalResource.uniqueId, result.data._id);
+        }
+      }
+      showToast("All records synced successfully!", "success");
+
+      // 5. Update local state with any new billingIds BEFORE invoicing
+      if (newBillingIds.size > 0) {
+        updatedResourcesForInvoice = resources.map(res => {
+          if (newBillingIds.has(res.uniqueId)) {
+            return { ...res, billingId: newBillingIds.get(res.uniqueId), isMonthlyRecord: true };
+          }
+          return res;
+        });
+        setResources(updatedResourcesForInvoice); // Update main state
+      }
+
+      // 6. NOW, proceed with invoice generation
+      // We invoice for records that have hours (billable or not, backend can filter)
+      const billingRecordIds = updatedResourcesForInvoice
+        .filter(r => r.hours > 0 && r.billingId) // Ensure it has hours AND a valid billingId
+        .map(r => r.billingId);
+
+      if (billingRecordIds.length === 0) {
+        showToast("No records with hours to invoice after sync.", "info");
+        setIsConfirmModalOpen(false);
+        setIsGeneratingInvoice(false);
+        return;
+      }
+
+      // 7. Create the invoice
+      const invoiceResponse = await fetch(`${apiBaseUrl}/invoices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -557,24 +652,26 @@ const Costing = () => {
           year: filters.year,
         }),
       });
-      const newInvoice = await response.json();
-      if (!response.ok) throw new Error(newInvoice.message || 'Failed to create invoice');
+      const newInvoice = await invoiceResponse.json();
+      if (!invoiceResponse.ok) throw new Error(newInvoice.message || 'Failed to create invoice');
 
       setInvoiceInfo({
         id: newInvoice.invoice_number,
         message: `Invoice ${newInvoice.invoice_number} generated`,
       });
       showToast(`Invoice ${newInvoice.invoice_number} created successfully!`);
+      
+      // 8. Final re-fetch to get fresh data from DB
+      await fetchBillingData();
 
     } catch (error) {
-      console.error("Invoice creation failed:", error);
+      console.error("Invoice creation or sync failed:", error);
       showToast(error.message, 'error');
     } finally {
       setIsConfirmModalOpen(false);
+      setIsGeneratingInvoice(false);
     }
   };
-
-
   const handleEditClick = async (resource) => {
     if (!productivityRatesMap[resource.subprojectId]) {
       try {
@@ -769,13 +866,49 @@ const Costing = () => {
     { header: 'Role', key: 'role' },
     { header: 'Productivity', key: 'productivity' },
     { header: 'Hours', key: 'hours' },
-    // { header: 'Cost Rate ($)', key: 'rate' }, // Internal Cost Rate
+     { header: 'Cost Rate ($)', key: 'rate' }, // Internal Cost Rate
     { header: 'Costing ($)', key: 'costing' }, // Calculated Cost
     { header: 'Billable', key: 'isBillable' },
     { header: 'Total Bill ($)', key: 'totalbill' }, // Calculated Revenue
     { header: 'Actions', key: 'actions' },
   ];
-  const sortableKeys = ['projectName', 'subProjectName', 'resource', 'flatrate', 'productivity', 'rate', 'costing', 'totalbill'];
+  const sortableKeys = ['projectName', 'subProjectName', 'resource', 'flatrate', 'productivity', 'costing rate', 'costing', 'totalbill'];
+
+  // ++ NEW: Skeleton Row Component for loading animation
+  const SkeletonRow = () => (
+    <tr className="border-b border-gray-100">
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div></td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div></td>
+      <td className="py-4 px-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 rounded-full bg-gray-200 animate-pulse"></div>
+          <div className="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div>
+        </div>
+      </td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div></td>
+      <td className="py-4 px-4"><div className="h-6 bg-gray-200 rounded-lg animate-pulse w-24"></div></td>
+      <td className="py-4 px-4"><div className="h-6 bg-gray-200 rounded-lg animate-pulse w-16"></div></td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded-full animate-pulse w-20"></div></td>
+      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
+      <td className="py-4 px-4"><div className="h-5 w-5 bg-gray-200 rounded-full animate-pulse"></div></td>
+    </tr>
+  );
+
+  // ++ NEW: Empty Row Component for no data
+  const EmptyRow = () => (
+    <tr>
+      <td colSpan={columnMap.length} className="text-center py-10 px-4">
+        <div className="text-gray-500">
+          <i className="fas fa-folder-open fa-3x mb-3"></i>
+          <h3 className="text-lg font-semibold">No Data Found</h3>
+          <p className="text-sm">No billing records match your current filters.</p>
+        </div>
+      </td>
+    </tr>
+  );
+
 
   return (
     <div className="bg-gray-50">
@@ -823,14 +956,11 @@ const Costing = () => {
               </div>
             </div>
 
+            {/* ++ MODIFIED: Use new Loader component */}
             {isLoading && (
-              <div className="flex items-center justify-center py-4">
-                <div className="flex items-center space-x-2 text-blue-600">
-                  <i className="fas fa-spinner fa-spin"></i>
-                  <span className="font-medium">Loading billing data...</span>
-                </div>
-              </div>
+              <Loader message="Loading billing data..." />
             )}
+            
             {isDataLoaded && !isLoading && (
               <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center space-x-2 text-green-700">
@@ -874,52 +1004,65 @@ const Costing = () => {
                     })}
                   </tr>
                 </thead>
+                {/* ++ MODIFIED: Replaced table body with conditional logic for Skeleton/Empty/Data */}
                 <tbody>
-                  {filteredResources.map(res => (
-                    <tr key={res.uniqueId} className={`border-b border-gray-100 transition-colors ${!res.isEditable ? 'bg-gray-100 opacity-70' : res.isBillable ? 'bg-green-50 hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
-                      <td className="py-4 px-4">{res.projectName || selectedProjectName}</td>
-                      <td className="py-4 px-4">{res.subProjectName || selectedSubProjectName}</td>
-                      <td className="py-4 px-4">
-                        <div className="flex items-center space-x-3">
-                          <img src={res.avatar_url} alt={res.name} className="w-8 h-8 rounded-full object-cover" />
-                          <span className="font-medium">{res.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-4 px-4 text-gray-600 font-semibold">{formatCurrency(res.flatrate)}</td>
-                      <td className="py-4 px-4 text-gray-600">{res.role}</td>
-                      <td className="py-4 px-4">
-                        <select value={res.productivity} onChange={(e) => handleResourceChange(res.uniqueId, 'productivity', e.target.value)} className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 disabled:bg-gray-200 disabled:cursor-not-allowed" disabled={!res.isEditable}>
-                          <option value="Low">Low</option>
-                          <option value="Medium">Medium</option>
-                          <option value="High">High</option>
-                          <option value="Best">Best</option>
-                        </select>
-                      </td>
-                      <td className="py-4 px-4">
-                        <input type="number" value={res.hours} onChange={(e) => handleResourceChange(res.uniqueId, 'hours', e.target.value)} className="w-16 px-2 py-1 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-center disabled:bg-gray-200 disabled:cursor-not-allowed" disabled={!res.isEditable} />
-                      </td>
-                      <td className="py-4 px-4 font-semibold text-red-600">{formatCurrency(res.rate)}</td>
-                      {/* <td className="py-4 px-4 font-bold text-red-700"> */}
-                      {/*   {formatCurrency(res.hours * res.rate)} */}
-                      {/* </td> */}
-                      <td className="py-4 px-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${res.isBillable ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-                          {res.isBillable ? '✅ Billable' : '🚫 Non-Billable'}
-                        </span>
-                      </td>
-                      <td className={`py-4 px-4 font-bold ${res.isBillable ? 'text-blue-700' : 'text-gray-600'}`}>
-                        {formatCurrency(res.hours * res.flatrate)}
-                      </td>
-                      <td className="py-4 px-4 text-left">
-                        <button onClick={() => handleEditClick(res)} className="text-blue-600 hover:text-blue-800 mr-3 p-1 rounded-full hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Edit" disabled={!res.isEditable || !res.billingId}>
-                          <svg xmlns="http://www.w3.org/2300/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
-                            <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {isLoading ? (
+                    <>
+                      <SkeletonRow />
+                      <SkeletonRow />
+                      <SkeletonRow />
+                      <SkeletonRow />
+                      <SkeletonRow />
+                    </>
+                  ) : filteredResources.length === 0 ? (
+                    <EmptyRow />
+                  ) : (
+                    filteredResources.map(res => (
+                      <tr key={res.uniqueId} className={`border-b border-gray-100 transition-colors ${!res.isEditable ? 'bg-gray-100 opacity-70' : res.isBillable ? 'bg-green-50 hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
+                        <td className="py-4 px-4">{res.projectName || selectedProjectName}</td>
+                        <td className="py-4 px-4">{res.subProjectName || selectedSubProjectName}</td>
+                        <td className="py-4 px-4">
+                          <div className="flex items-center space-x-3">
+                            <img src={res.avatar_url} alt={res.name} className="w-8 h-8 rounded-full object-cover" />
+                            <span className="font-medium">{res.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4 text-gray-600 font-semibold">{formatCurrency(res.flatrate)}</td>
+                        <td className="py-4 px-4 text-gray-600">{res.role}</td>
+                        <td className="py-4 px-4">
+                          <select value={res.productivity} onChange={(e) => handleResourceChange(res.uniqueId, 'productivity', e.target.value)} className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 disabled:bg-gray-200 disabled:cursor-not-allowed" disabled={!res.isEditable}>
+                            <option value="Low">Low</option>
+                            <option value="Medium">Medium</option>
+                            <option value="High">High</option>
+                            <option value="Best">Best</option>
+                          </select>
+                        </td>
+                        <td className="py-4 px-4">
+                          <input type="number" value={res.hours} onChange={(e) => handleResourceChange(res.uniqueId, 'hours', e.target.value)} className="w-16 px-2 py-1 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-center disabled:bg-gray-200 disabled:cursor-not-allowed" disabled={!res.isEditable} />
+                        </td>
+                        <td className="py-4 px-4 font-semibold text-red-600">{formatCurrency(res.rate)}</td>
+                        <td className="py-4 px-4 font-bold text-red-700">
+                        {formatCurrency(res.hours * res.rate)}
+                        </td>
+                        <td className="py-4 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${res.isBillable ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                            {res.isBillable ? '✅ Billable' : '🚫 Non-Billable'}
+                          </span>
+                        </td>
+                        <td className={`py-4 px-4 font-bold ${res.isBillable ? 'text-blue-700' : 'text-gray-600'}`}>
+                          {formatCurrency(res.hours * res.flatrate)}
+                        </td>
+                        <td className="py-4 px-4 text-left">
+                          <button onClick={() => handleEditClick(res)} className="text-blue-600 hover:text-blue-800 mr-3 p-1 rounded-full hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Edit" disabled={!res.isEditable || !res.billingId}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                              <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1012,28 +1155,39 @@ const Costing = () => {
         </div>
       )}
 
+      {/* ++ MODIFIED: Confirmation modal now shows a loader when isGeneratingInvoice is true */}
       {isConfirmModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
           <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Confirm Invoice Generation</h2>
-            <p className="text-gray-600 mb-6">
-              Are you sure you want to generate an invoice for{' '}
-              <span className="font-semibold text-blue-600">
-                {new Date(0, filters.month - 1).toLocaleString('default', { month: 'long' })} {filters.year}
-              </span>? This action is irreversible.
-            </p>
+            
+            {isGeneratingInvoice ? (
+              <div className="py-4">
+                <Loader message="Generating... Please wait." />
+              </div>
+            ) : (
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to generate an invoice for{' '}
+                <span className="font-semibold text-blue-600">
+                  {new Date(0, filters.month - 1).toLocaleString('default', { month: 'long' })} {filters.year}
+                </span>? This action is irreversible.
+              </p>
+            )}
+
             <div className="flex justify-center space-x-4">
               <button
                 onClick={() => setIsConfirmModalOpen(false)}
                 className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
+                disabled={isGeneratingInvoice}
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmInvoice}
-                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:bg-green-300 disabled:cursor-not-allowed"
+                disabled={isGeneratingInvoice}
               >
-                Confirm & Generate
+                {isGeneratingInvoice ? 'Processing...' : 'Confirm & Generate'}
               </button>
             </div>
           </div>

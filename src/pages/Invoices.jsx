@@ -86,6 +86,7 @@ const Invoices = () => {
         if (!res.ok) throw new Error('Failed to fetch invoices');
         const data = await res.json();
         setInvoices(data);
+        console.log(data)
       } catch (err) {
         console.error('Error fetching invoices:', err);
       } finally {
@@ -211,114 +212,140 @@ const Invoices = () => {
 
   // --- HANDLE PDF DOWNLOAD ---
   const handleDownloadPdf = () => {
-    // NOTE: This uses alert as a placeholder for a custom UI modal
-    if (!isPdfLibReady || !selectedInvoice) return console.error("PDF not ready or no invoice selected.");
+  if (!isPdfLibReady || !selectedInvoice) 
+    return console.error("PDF not ready or no invoice selected.");
 
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
 
-    doc.setFontSize(20);
-    doc.text(`Invoice: ${selectedInvoice.invoice_number}`, 14, 22);
+  doc.setFontSize(20);
+  doc.text(`Invoice: ${selectedInvoice.invoice_number}`, 14, 22);
 
-    const first = selectedInvoice.billing_records[0];
-    if (first) {
-      const period = `${new Date(0, first.month - 1).toLocaleString('default', { month: 'long' })} ${first.year}`;
-      doc.setFontSize(12);
-      doc.text(`For Period: ${period}`, 14, 30);
-    }
-    doc.text(`Date Generated: ${formatDate(selectedInvoice.createdAt)}`, 14, 36);
+  const first = selectedInvoice.billing_records[0];
+  if (first) {
+    const period = `${new Date(0, first.month - 1).toLocaleString('default', { month: 'long' })} ${first.year}`;
+    doc.setFontSize(12);
+    doc.text(`For Period: ${period}`, 14, 30);
+  }
+  doc.text(`Date Generated: ${formatDate(selectedInvoice.createdAt)}`, 14, 36);
 
-    const rows = getLookups(selectedInvoice);
-    // UPDATED: Added 'Costing' to PDF table headers
-    const head = [['Project', 'Sub-Project', 'Resource', 'Hours', 'Rate', 'Costing', 'Total', 'Status']];
-    const body = rows.map(r => [
-      r.projectName,
-      r.subprojectName,
-      r.resourceName,
-      r.hours,
-      formatCurrency(r.rate),
-      // UPDATED: Added Costing field
-      formatCurrency(r.costing),
-      // FIX: Use pre-calculated total_amount instead of multiplying rate * hours
-      formatCurrency(r.total_amount),
-      r.billable_status
-    ]);
+  const rows = getLookups(selectedInvoice);
+  // ✅ UPDATED HEADERS (added Flat Rate)
+  const head = [['Project', 'Sub-Project', 'Resource', 'Hours', 'Flat Rate', 'Rate', 'Costing', 'Total', 'Status']];
 
-    doc.autoTable({ startY: 45, head, body });
-    const finalY = doc.autoTable.previous.finalY;
+  const body = rows.map(r => {
+  const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
+  const totalValue = isNonBillable ? 0 : r.total_amount;
 
-    // --- Summary Totals ---
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    let currentY = finalY + 15;
-    doc.text(`Billing Total (Billable + Non-Billable): ${formatCurrency(selectedInvoice.total_billing_amount)}`, 14, currentY);
+  return [
+    r.projectName,
+    r.subprojectName,
+    r.resourceName,
+    r.hours,
+    formatCurrency(r.flatrate),
+    formatCurrency(r.rate),
+    formatCurrency(r.costing),
+    formatCurrency(totalValue), // ✅ updated
+    r.billable_status
+  ];
+});
 
-    currentY += 8;
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Total Costing Amount: ${formatCurrency(selectedInvoice.total_costing_amount)}`, 14, currentY);
-    currentY += 8;
-    doc.text(`Total Billing Amount: ${formatCurrency(selectedInvoice.total_billing_amount)}`, 14, currentY);
-    // --- End Summary Totals ---
 
-    doc.save(`Invoice-${selectedInvoice.invoice_number}.pdf`);
-  };
+  doc.autoTable({ startY: 45, head, body });
+  const finalY = doc.autoTable.previous.finalY;
 
+  // --- Summary Totals ---
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  let currentY = finalY + 15;
+  // doc.text(`Billing Total (Billable + Non-Billable): ${formatCurrency(selectedInvoice.total_billing_amount)}`, 14, currentY);
+
+  currentY += 8;
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Total Costing Amount: ${formatCurrency(selectedInvoice.total_costing_amount)}`, 14, currentY);
+  currentY += 8;
+  doc.text(`Total Billing Amount: ${formatCurrency(selectedInvoice.total_billable_amount)}`, 14, currentY);
+
+  doc.save(`Invoice-${selectedInvoice.invoice_number}.pdf`);
+};
   // --- NEW: HANDLE CSV DOWNLOAD ---
-  const handleDownloadCsv = (invoice) => {
-    const records = getLookups(invoice);
+ const handleDownloadCsv = (invoice) => {
+  if (!invoice) return console.error("No invoice selected.");
 
-    // Define CSV Headers
-    // UPDATED: Added 'Costing_USD' header
-    const headers = [
-      "Invoice_Number",
-      "Billing_Month",
-      "Billing_Year",
-      "Project",
-      "Sub_Project",
-      "Resource",
-      "Hours",
-      "Rate_USD",
-      "Costing_USD",
-      "Total_USD",
-      "Status"
-    ];
+  const records = getLookups(invoice);
+  const firstRecord = invoice.billing_records[0] || {};
+  const monthName = firstRecord.month
+    ? new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' })
+    : '';
 
-    // Format Rows
-    const firstRecord = invoice.billing_records[0] || {};
-    const monthName = new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' });
+  // ✅ Match PDF headers
+  const headers = [
+    "Invoice_Number",
+    "Billing_Month",
+    "Billing_Year",
+    "Project",
+    "Sub_Project",
+    "Resource",
+    "Hours",
+    "Flat_Rate",
+    "Rate",
+    "Costing",
+    "Total",
+    "Status"
+  ];
 
-    const csvRows = records.map(r => [
-      invoice.invoice_number,
-      monthName,
-      firstRecord.year,
-      // Wrap text fields in quotes to handle commas within names
-      `"${r.projectName.replace(/"/g, '""')}"`,
-      `"${r.subprojectName.replace(/"/g, '""')}"`,
-      `"${r.resourceName.replace(/"/g, '""')}"`,
-      r.hours,
-      r.rate,
-      r.costing, // UPDATED: Added Costing value
-      r.total_amount, // FIX: Use pre-calculated total_amount
-      r.billable_status
-    ].join(','));
+  // ✅ Generate data rows
+const csvRows = records.map(r => {
+  const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
+  const totalValue = isNonBillable ? 0 : r.total_amount;
 
-    // Combine all parts
-    const csvContent = [
-      headers.join(','),
-      ...csvRows
-    ].join('\n');
+  return [
+    invoice.invoice_number,
+    monthName,
+    firstRecord.year || '',
+    `"${r.projectName?.replace(/"/g, '""') || ''}"`,
+    `"${r.subprojectName?.replace(/"/g, '""') || ''}"`,
+    `"${r.resourceName?.replace(/"/g, '""') || ''}"`,
+    r.hours || 0,
+    r.flatrate || 0,
+    r.rate || 0,
+    r.costing || 0,
+    totalValue || 0, // ✅ updated
+    r.billable_status || ''
+  ].join(',');
+});
 
-    // Create Blob and trigger download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Invoice-${invoice.invoice_number}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+
+  // ✅ Add summary totals (same as in PDF)
+  const summaryRows = [
+    "",
+    "SUMMARY TOTALS",
+    "",
+    `Total Costing Amount:,${invoice.total_costing_amount || 0}`,
+    // `Total Non-BillableAmount:,${invoice.total_non_billable_amount || 0}`,
+    `Total Billable Amount:,${invoice.total_billable_amount || 0}`
+  ];
+
+  // ✅ Combine CSV
+  const csvContent = [
+    headers.join(','),
+    ...csvRows,
+    '',
+    ...summaryRows
+  ].join('\n');
+
+  // ✅ Download logic
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Invoice-${invoice.invoice_number}.csv`;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 
   // --- RENDER ---
   return (
@@ -465,23 +492,24 @@ const Invoices = () => {
               <div>
                 <h2 className="text-2xl font-bold text-gray-800">Invoice {selectedInvoice.invoice_number}</h2>
                 {/* Displaying both new totals */}
-                <p className="text-sm text-gray-500 mt-1">
+                {/* <p className="text-sm text-gray-500 mt-1">
                   <span className="font-semibold text-gray-700">Billing Total:</span> {formatCurrency(selectedInvoice.total_billing_amount)}
                   <span className="mx-2 text-gray-300">|</span>
                   <span className="font-semibold text-gray-700">Costing Total:</span> {formatCurrency(selectedInvoice.total_costing_amount)}
-                </p>
+                </p> */}
               </div>
               <button onClick={() => setSelectedInvoice(null)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
             </div>
 
             <div className="p-6 overflow-y-auto">
               <h3 className="text-lg font-semibold text-gray-700 mb-4">Billing Records ({selectedInvoice.billing_records.length})</h3>
+              {console.log(selectedInvoice.billing_records)}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
                       {/* UPDATED: Added 'Costing' to modal table headers */}
-                      {['Project', 'Sub-Project', 'Resource', 'Hours', 'Rate', 'Costing', 'Total', 'Status'].map(h => (
+                      {['Project', 'Sub-Project', 'Resource', 'Hours','flat rate', 'costing Rate', 'Costing', 'Total', 'Status'].map(h => (
                         <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
@@ -493,11 +521,19 @@ const Invoices = () => {
                         <td className="px-4 py-3 text-sm text-gray-700">{record.subprojectName}</td>
                         <td className="px-4 py-3 text-sm text-gray-800">{record.resourceName}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{record.hours}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.flatrate)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.rate)}</td>
                         {/* UPDATED: Added Costing field to modal table body */}
                         <td className="px-4 py-3 text-sm text-red-600">{formatCurrency(record.costing)}</td>
                         {/* FIX: Use pre-calculated total_amount */}
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">{formatCurrency(record.total_amount)}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">
+  {formatCurrency(
+    record.billable_status?.toLowerCase() === 'non-billable'
+      ? 0
+      : record.total_amount
+  )}
+</td>
+
                         <td className="px-4 py-3 text-sm text-gray-600">{record.billable_status}</td>
                       </tr>
                     ))}
