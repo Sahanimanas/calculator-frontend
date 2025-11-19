@@ -29,34 +29,77 @@ const ProjectPage = () => {
 
   // ✅ CSV Upload Handler
   const handleCSVUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  const file = event.target.files[0];
+  if (!file) return;
 
-    if (file.type !== "text/csv") {
-      toast.error("Please upload a valid CSV file");
+  if (file.type !== "text/csv") {
+    toast.error("Please upload a valid CSV file");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  toast.loading("Uploading CSV...");
+
+  try {
+    const res = await axios.post(
+      `${import.meta.env.VITE_BACKEND_URL}/upload/bulk-upload`,
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        responseType: "blob",
+      }
+    );
+
+    // ---- SUCCESS CASE ----
+    const isJSON = res.headers["content-type"]?.includes("application/json");
+
+    if (isJSON) {
+      // Parse JSON success response
+      const text = await res.data.text();
+      const json = JSON.parse(text);
+
+      toast.dismiss();
+      toast.success(json.message || "CSV uploaded successfully!");
+
+      fetchData();
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
+  } catch (err) {
 
-    try {
-      toast.loading("Uploading CSV...");
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/projects/bulk-upload`, formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
+    // ---- CSV ERROR FILE FROM BACKEND ----
+    if (err?.response?.status === 400 &&
+        err.response.headers["content-type"]?.includes("text/csv")) 
+    {
+      const blob = err.response.data;
+
+      const fileName =
+        err.response.headers["content-disposition"]?.split("filename=")[1] ||
+        "bulk-upload-errors.csv";
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+
       toast.dismiss();
-      toast.success(res.data.message || "CSV uploaded successfully!");
-      fetchData();
-    } catch (error) {
-      toast.dismiss();
-      toast.error(error.response?.data?.message || "Failed to upload CSV");
-    } finally {
-      event.target.value = ""; // reset
+      toast.error("CSV contains errors. Please check the downloaded file.");
+      return;
     }
-  };
+
+    // ---- UNEXPECTED ERRORS ----
+    toast.dismiss();
+    toast.error("Upload failed. Please try again.");
+    console.error(err);
+
+  } finally {
+    event.target.value = ""; // reset input
+  }
+};
+
 
   return (
     <div>
@@ -107,26 +150,43 @@ const ProjectPage = () => {
 
         {/* ✅ Format info box */}
         {showCsvFormat && (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 shadow-sm text-sm text-gray-700 animate-fadeIn">
-            <h3 className="font-semibold text-gray-800 mb-2">CSV Format Guide</h3>
-            <p className="mb-2">
-              The CSV file must include the following columns (in order):
-            </p>
-            <pre className="bg-white border border-gray-200 rounded-lg p-3 overflow-x-auto text-sm text-gray-800">
-              serial_number, project_name, visibility, subprojects, created_on, project_price, updated_at
-            </pre>
+  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 shadow-sm text-sm text-gray-700 animate-fadeIn">
 
-            <ul className="list-disc list-inside mt-3 text-gray-600">
-              <li><strong>serial_number</strong>: Unique ID or order number</li>
-              <li><strong>project_name</strong>: Name of the project</li>
-              <li><strong>visibility</strong>: “public” or “private”</li>
-              <li><strong>subprojects</strong>: Multiple subprojects separated by commas (e.g., “Design, Development, QA”)</li>
-              <li><strong>created_on</strong>: Date of project creation (YYYY-MM-DD)</li>
-              <li><strong>project_price</strong>: Numeric project cost</li>
-              <li><strong>updated_at</strong>: Last updated date (YYYY-MM-DD)</li>
-            </ul>
-          </div>
-        )}
+    <h3 className="font-semibold text-gray-800 mb-2">CSV Format Guide</h3>
+    <p className="mb-2">
+      The CSV file must include the following columns (exact order required):
+    </p>
+
+    <pre className="bg-white border border-gray-200 rounded-lg p-3 overflow-x-auto text-sm text-gray-800">
+project_name,project_description,visibility,status,flatrate,subproject_name,subproject_description,subproject_status
+    </pre>
+
+    <ul className="list-disc list-inside mt-3 text-gray-600">
+      <li><strong>project_name</strong>: Name of the project (required)</li>
+      <li><strong>project_description</strong>: Description of the project (optional)</li>
+
+      <li><strong>visibility</strong>: Must be <em>“visible”</em> or <em>“hidden”</em></li>
+      <li><strong>status</strong>: Must be <em>“active”</em> or <em>“inactive”</em></li>
+
+      <li><strong>flatrate</strong>: Numeric value (e.g., 0, 99.99, 120)</li>
+
+      <li><strong>subproject_name</strong>: Name of the subproject (required)</li>
+      <li><strong>subproject_description</strong>: Description of the subproject (optional)</li>
+
+      <li><strong>subproject_status</strong>: Must be <em>“active”</em> or <em>“inactive”</em></li>
+    </ul>
+
+    <p className="mt-4 text-gray-700 font-medium">Example CSV:</p>
+    <pre className="bg-white border border-gray-200 rounded-lg p-3 overflow-x-auto text-sm text-gray-800">
+project_name,project_description,visibility,status,flatrate,subproject_name,subproject_description,subproject_status
+Alpha Project,Main Alpha project,visible,active,100,Sub A,Alpha sub A,active
+Alpha Project,Main Alpha project,visible,active,100,Sub B,Alpha sub B,inactive
+Beta Project,,hidden,active,50,Sub X,First sub of Beta,active
+Gamma Project,Description here,visible,active,0,Sub G,,active
+    </pre>
+  </div>
+)}
+
       </div>
 
       <div>

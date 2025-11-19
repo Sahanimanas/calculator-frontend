@@ -14,12 +14,15 @@ const apiBaseUrl = import.meta.env.VITE_BACKEND_URL;
 
 // ++ NEW: Reusable Loader Component
 const Loader = ({ message = "Loading..." }) => (
-  <div className="flex flex-col items-center justify-center p-6">
-    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-    <p className="mt-3 text-sm font-medium text-gray-700">{message}</p>
+  <div className="flex flex-col items-center py-6">
+    <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+    <p className="mt-3 text-sm text-gray-500 animate-pulse">{message}</p>
   </div>
 );
-
+// ---- CACHE (persists during page session, no rerenders) ----
+const productivityRatesCache = new Map(); 
+let resourcesCache = null;
+let resourcesCacheTime = 0;
 
 const Costing = () => {
   // State for managing filters, data, and UI
@@ -73,7 +76,7 @@ const Costing = () => {
     };
     fetchProjects();
   }, []);
-     const fetchBillingData = useCallback(async () => {
+ const fetchBillingData = useCallback(async () => {
     const { project, subProject, month, year } = filters;
 
     if (projectsData.length === 0 || subprojects.length === 0) {
@@ -97,9 +100,26 @@ const Costing = () => {
     }
 
     // Fetch all productivity rates required
-    const productivityPromises = subprojectIdsToFetchRates.map(spId =>
-      fetch(`${apiBaseUrl}/productivity?subproject_id=${spId}`).then(res => res.ok ? res.json() : [])
-    );
+    // const productivityPromises = subprojectIdsToFetchRates.map(spId =>
+    //   fetch(`${apiBaseUrl}/productivity?subproject_id=${spId}`).then(res => res.ok ? res.json() : [])
+    // );
+    const productivityPromises = subprojectIdsToFetchRates.map(async (spId) => {
+
+  // ✔ If cache exists, return cached value
+  if (productivityRatesCache.has(spId)) {
+    return productivityRatesCache.get(spId);
+  }
+
+  // ❌ If not cached, fetch once
+  const res = await fetch(`${apiBaseUrl}/productivity?subproject_id=${spId}`);
+  const data = res.ok ? await res.json() : [];
+
+  // ✔ Store to cache
+  productivityRatesCache.set(spId, data);
+
+  return data;
+});
+
     const allProductivityRatesNested = await Promise.all(productivityPromises);
     const ratesMap = subprojectIdsToFetchRates.reduce((acc, spId, index) => {
       acc[spId] = allProductivityRatesNested[index];
@@ -115,9 +135,24 @@ const Costing = () => {
       setResources([]);
       try {
         // Fetch ALL resources
-        const resourcesRes = await fetch(`${apiBaseUrl}/resource`);
-        if (!resourcesRes.ok) throw new Error('Could not fetch resources.');
-        const allResources = await resourcesRes.json();
+        // ---- RESOURCES CACHE LOGIC ----
+let allResources;
+
+if (resourcesCache) {
+  // ✔ Already cached → reuse
+  allResources = resourcesCache;
+} else {
+  // ❌ First time → fetch and cache
+  const resourcesRes = await fetch(`${apiBaseUrl}/resource`);
+  if (!resourcesRes.ok) throw new Error('Could not fetch resources.');
+
+  allResources = await resourcesRes.json();
+
+  // Store in cache
+  resourcesCache = allResources;
+  resourcesCacheTime = Date.now();
+}
+
         const allResourcesMap = new Map(allResources.map(r => [r._id, r])); // Map for quick lookup
 
         // Fetch ALL billing records for the CURRENT month/year AND records with NULL month
@@ -125,9 +160,9 @@ const Costing = () => {
         if (!currentMonthBillingRes.ok) throw new Error('Could not fetch current month billing records.');
         const currentMonthBillingRecords = await currentMonthBillingRes.json();
 
-        const nullMonthBillingRes = await fetch(`${apiBaseUrl}/billing?month=null`);
-        if (!nullMonthBillingRes.ok) throw new Error('Could not fetch initial billing records.');
-        const nullMonthBillingRecords = await nullMonthBillingRes.json();
+        // const nullMonthBillingRes = await fetch(`${apiBaseUrl}/billing?month=null`);
+        // if (!nullMonthBillingRes.ok) throw new Error('Could not fetch initial billing records.');
+        const nullMonthBillingRecords = [];
 
         // Combine monthly records and initial (null month) records, prioritizing monthly records
         const billingRecordsMap = new Map();
@@ -689,41 +724,7 @@ const handleConfirmInvoice = async () => {
     setIsModalOpen(true);
   };
 
-  const handleDeleteBilling = async (resource) => {
-    if (!resource.billingId) {
-      showToast("This resource has no billing record to delete.", "error");
-      return;
-    }
-
-    try {
-      const response = await fetch(`${apiBaseUrl}/billing/${resource.billingId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete billing record');
-      }
-
-      showToast('Billing record deleted successfully!');
-
-      const ratesForSubproject = productivityRatesMap[resource.subprojectId] || [];
-      const rateRecord = ratesForSubproject.find(r => r.level.toLowerCase() === 'medium');
-
-      setResources(currentResources =>
-        currentResources.map(res =>
-          res.uniqueId === resource.uniqueId
-            ? { ...res, hours: 0, productivity: 'Medium', rate: rateRecord?.base_rate ?? 0, isBillable: true, billingId: null, description: '' }
-            : res
-        )
-      );
-
-    } catch (error) {
-      console.error('Error deleting billing record:', error);
-      showToast(error.message, 'error');
-    }
-  };
-
+  
   const handleModalFormChange = (e) => {
     const { name, value, type, checked } = e.target;
 
@@ -875,26 +876,14 @@ const handleConfirmInvoice = async () => {
   const sortableKeys = ['projectName', 'subProjectName', 'resource', 'flatrate', 'productivity', 'costing rate', 'costing', 'totalbill'];
 
   // ++ NEW: Skeleton Row Component for loading animation
-  const SkeletonRow = () => (
-    <tr className="border-b border-gray-100">
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div></td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div></td>
-      <td className="py-4 px-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-full bg-gray-200 animate-pulse"></div>
-          <div className="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div>
-        </div>
-      </td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/2"></div></td>
-      <td className="py-4 px-4"><div className="h-6 bg-gray-200 rounded-lg animate-pulse w-24"></div></td>
-      <td className="py-4 px-4"><div className="h-6 bg-gray-200 rounded-lg animate-pulse w-16"></div></td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded-full animate-pulse w-20"></div></td>
-      <td className="py-4 px-4"><div className="h-4 bg-gray-200 rounded animate-pulse w-1/4"></div></td>
-      <td className="py-4 px-4"><div className="h-5 w-5 bg-gray-200 rounded-full animate-pulse"></div></td>
-    </tr>
-  );
+const SkeletonRow = () => (
+  <tr className="animate-pulse">
+    <td colSpan={12} className="py-3 px-4">
+      <div className="h-4 bg-gray-200 rounded w-full"></div>
+    </td>
+  </tr>
+);
+
 
   // ++ NEW: Empty Row Component for no data
   const EmptyRow = () => (
@@ -1008,10 +997,6 @@ const handleConfirmInvoice = async () => {
                 <tbody>
                   {isLoading ? (
                     <>
-                      <SkeletonRow />
-                      <SkeletonRow />
-                      <SkeletonRow />
-                      <SkeletonRow />
                       <SkeletonRow />
                     </>
                   ) : filteredResources.length === 0 ? (
