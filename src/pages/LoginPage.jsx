@@ -36,9 +36,7 @@ const LoginPage = () => {
         <h1 className="text-2xl font-bold text-gray-900">
           Project Billing Calculator
         </h1>
-        <p className="text-gray-500 mt-1 text-sm">
-          Smart Billing & Productivity Tracking
-        </p>
+       
       </div>
 
       {/* Login Card */}
@@ -80,8 +78,8 @@ const LoginPage = () => {
             </div>
           </div>
 
-          {/* Remember + Forgot */}
-          <div className="flex items-center justify-between text-sm">
+         
+        {/* <div className="flex items-center justify-between text-sm">
             <label className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -95,7 +93,9 @@ const LoginPage = () => {
             >
               Forgot Password?
             </button>
-          </div>
+          </div>  */}
+          
+       
 
           {/* Login Button */}
           <button
@@ -108,16 +108,7 @@ const LoginPage = () => {
         </form>
       </div>
 
-      {/* Footer */}
-      <div className="mt-6 text-center text-sm text-gray-500">
-        Need help?{" "}
-        <a href="#" className="text-blue-600 hover:underline">
-          Contact Support
-        </a>
-        <p className="mt-2 text-gray-400 text-xs">
-          © 2025 Project Billing Calculator. All rights reserved.
-        </p>
-      </div>
+      
     </div>
   );
 };

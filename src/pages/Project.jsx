@@ -7,7 +7,10 @@ import { fetchProjectsWithSubProjects } from "../services/projectService.js";
 import ProjectTable from "../components/Project/ProjectTable.jsx";
 import toast from "react-hot-toast";
 import axios from "axios";
-
+import {
+  ArrowDownTrayIcon,
+  
+} from "@heroicons/react/24/outline";
 const ProjectPage = () => {
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
   const [isCreateSubProjectModalOpen, setIsCreateSubProjectModalOpen] = useState(false);
@@ -137,6 +140,26 @@ const ProjectPage = () => {
               className="hidden"
             />
           </label>
+<button
+  onClick={() => {
+    const csvHeader =
+      "project_name,project_description,visibility,status,flatrate,subproject_name,subproject_description,subproject_status\n";
+
+    const blob = new Blob([csvHeader], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "project-subproject-template.csv";
+    a.click();
+
+    URL.revokeObjectURL(url);
+  }}
+  className="cursor-pointer bg-purple-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-purple-700"
+>
+ <ArrowDownTrayIcon className="w-5 h-5"/>
+  Download Template
+</button>
 
           {/* ✅ Info toggle */}
           <button

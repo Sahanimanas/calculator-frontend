@@ -880,6 +880,7 @@ const SkeletonRow = () => (
   <tr className="animate-pulse">
     <td colSpan={12} className="py-3 px-4">
       <div className="h-4 bg-gray-200 rounded w-full"></div>
+       <div className="h-4 bg-gray-200 rounded w-full"></div>
     </td>
   </tr>
 );
@@ -995,12 +996,13 @@ const SkeletonRow = () => (
                 </thead>
                 {/* ++ MODIFIED: Replaced table body with conditional logic for Skeleton/Empty/Data */}
                 <tbody>
-                  {isLoading ? (
+                {/* isLoading ? (
                     <>
                       <SkeletonRow />
                     </>
-                  ) : filteredResources.length === 0 ? (
-                    <EmptyRow />
+                  ) :    */}
+                  {filteredResources.length === 0 ? (
+                    <SkeletonRow />
                   ) : (
                     filteredResources.map(res => (
                       <tr key={res.uniqueId} className={`border-b border-gray-100 transition-colors ${!res.isEditable ? 'bg-gray-100 opacity-70' : res.isBillable ? 'bg-green-50 hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
