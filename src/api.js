@@ -1,4 +1,5 @@
 import axios from "axios";
+import toast from "react-hot-toast";
 
 // ✅ Create Axios instance
 const api = axios.create({
@@ -28,9 +29,8 @@ api.interceptors.response.use(
   (error) => {
     // Handle global errors here
     if (error.response) {
-      console.error("API Error:", error.response.data);
       if (error.response.status === 401) {
-        console.warn("Unauthorized — redirecting to login");
+        toast.error("Wrong Credentials. Please try again.");
         // Optionally logout or redirect
       }
     } else {

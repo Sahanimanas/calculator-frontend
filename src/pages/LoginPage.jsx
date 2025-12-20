@@ -1,25 +1,28 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiMail, FiLock, FiLogIn } from "react-icons/fi";
+import { FiMail, FiLock, FiLogIn ,FiEye,FiEyeOff} from "react-icons/fi";
 import { FaCalculator } from "react-icons/fa6";
 import { loginUser } from '../services/authService.js'
-
+import toast from "react-hot-toast";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showpassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
       const data = await loginUser(email, password);
-      console.log("This is the data: ", data);
+      if(data.message){
+        toast.error(data.message);
+        return;
+      }
+      // console.log("This is the data: ", data);
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
       navigate('/');
-
-
     } catch (error) {
       console.log("This is the error: ", error);
 
@@ -68,13 +71,21 @@ const LoginPage = () => {
             <div className="relative">
               <FiLock className="absolute left-3 top-3 text-gray-400" />
               <input
-                type="password"
+                type={showpassword ? "text" : "password"}
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+              {showpassword?<FiEye
+                className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                onClick={() => setShowPassword(!showpassword)}
+              />:
+              <FiEyeOff
+                className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                onClick={() => setShowPassword(!showpassword)}
+              />}
             </div>
           </div>
 

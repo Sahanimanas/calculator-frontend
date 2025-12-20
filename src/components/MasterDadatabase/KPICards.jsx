@@ -55,43 +55,43 @@ const KPICards = () => {
       icon: <FolderKanban className="w-6 h-6 text-orange-500" />,
       title: "Total Projects",
       value: stats.projects?.total || 0,
-      subtitle: `${stats.projects?.visible || 0} visible`,
+      // subtitle: `${stats.projects?.visible || 0} visible`,
     },
     {
       icon: <FolderOpen className="w-6 h-6 text-yellow-500" />,
       title: "Sub-Projects",
       value: stats.sub_projects?.total || 0,
-      subtitle: `${stats.sub_projects?.active || 0} active`,
+      // subtitle: `${stats.sub_projects?.active || 0} active`,
     },
     {
       icon: <Users className="w-6 h-6 text-blue-600" />,
       title: "Resources",
       value: stats.resources?.total || 0,
-      subtitle: `${stats.resources?.billable || 0} billable`,
+      // subtitle: `${stats.resources?.billable || 0} billable`,
     },
     {
       icon: <Zap className="w-6 h-6 text-yellow-500" />,
       title: "Productivity Tiers",
       value: stats.productivity_tiers?.total || 0,
-      subtitle: stats.productivity_tiers?.label || "",
+      // subtitle: stats.productivity_tiers?.label || "",
     },
     {
       icon: <BadgeDollarSign className="w-6 h-6 text-green-600" />,
       title: "Billing Records",
       value: stats.billing_records?.total || 0,
-      subtitle: stats.billing_records?.label || "",
+      // subtitle: stats.billing_records?.label || "",
     },
-    {
-      icon: <RefreshCcw className="w-6 h-6 text-cyan-600" />,
-      title: "Updates Today",
-      value: stats.updates_today?.total || 0,
-      subtitle: `Last sync: ${stats.updates_today?.last_sync || "N/A"}`,
-    },
+    // {
+    //   icon: <RefreshCcw className="w-6 h-6 text-cyan-600" />,
+    //   title: "Updates Today",
+    //   value: stats.updates_today?.total || 0,
+    //   // subtitle: `Last sync: ${stats.updates_today?.last_sync || "N/A"}`,
+    // },
   ];
 
   return (
     <div className="bg-gray-50 p-4 m-5 rounded-xl shadow-sm border">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 ">
         {cards.map((card, index) => (
           <div
             key={index}

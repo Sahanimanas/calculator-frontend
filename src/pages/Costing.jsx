@@ -68,7 +68,7 @@ const Costing = () => {
         const subdata = await res.json();
         const data = await response.json();
         setProjectsData(data);
-        setSubprojects(subdata);
+        setSubprojects(subdata.data);
       } catch (error) {
         console.error("Error fetching projects:", error);
         showToast(`Error fetching projects: ${error.message}`, 'error');

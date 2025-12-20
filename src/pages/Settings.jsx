@@ -3,8 +3,10 @@ import axios from "axios";
 import {
   LockClosedIcon,
   EnvelopeIcon,
-  UserPlusIcon,
+  UserPlusIcon
 } from "@heroicons/react/24/outline";
+
+import {FiEye,FiEyeOff} from "react-icons/fi";
 
 const SettingsPage = () => {
   const [email, setEmail] = useState("");
@@ -12,9 +14,9 @@ const SettingsPage = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
-
+  const [showPassword, setShowPassword] = useState(false);
   // 👇 base URL (reads from .env for clean config)
-  const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8001";
+  const BASE_URL = import.meta.env.VITE_BACKEND_URL 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -98,13 +100,21 @@ const SettingsPage = () => {
             <div className="relative">
               <LockClosedIcon className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="Enter password"
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
+              {showPassword ? <FiEye
+                              className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                              onClick={() => setShowPassword(!showPassword)}
+                            /> :
+                            <FiEyeOff
+                              className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                              onClick={() => setShowPassword(!showPassword)}
+                            />}
             </div>
           </div>
 
@@ -115,13 +125,20 @@ const SettingsPage = () => {
             <div className="relative">
               <LockClosedIcon className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
                 placeholder="Re-enter password"
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
+              />{showPassword ? <FiEye
+                              className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                              onClick={() => setShowPassword(!showPassword)}
+                            /> :
+                            <FiEyeOff
+                              className="absolute right-3 top-3 text-gray-400 cursor-pointer"
+                              onClick={() => setShowPassword(!showPassword)}
+                            />}
             </div>
           </div>
 

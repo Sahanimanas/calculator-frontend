@@ -26,12 +26,14 @@ export const fetchProjects = async () => {
   };
 };
 
-export const fetchProjectsWithSubProjects = async () => {
-  const response = await api.get("/project/project-subproject");
-  // console.log("thi is the log of the response: ", response.data);
+export const fetchProjectsWithSubProjects = async (page = 1, limit = 10) => {
+  const response = await api.get("/project/project-subproject", {
+    params: { page, limit }
+  });
 
   return {
-    data: response.data,
+    data: response.data.data,
+    pagination: response.data.pagination,
     status: response.status
   };
 };

@@ -17,7 +17,7 @@ const SubprojectsContent = () => {
         const res = await fetch(API_URL);
         if (!res.ok) throw new Error("Failed to fetch project-subproject data");
         const data = await res.json();
-        setProjects(data);
+        setProjects(data.data || data);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -29,6 +29,11 @@ const SubprojectsContent = () => {
 
   const toggleExpand = (id) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // Calculate total flatrate for a project's subprojects
+  const calculateTotalFlatrate = (subprojects) => {
+    return subprojects.reduce((total, sp) => total + (sp.flatrate || 0), 0);
   };
 
   // Filter projects based on subproject search
@@ -106,14 +111,16 @@ const SubprojectsContent = () => {
               <th className="px-6 py-3">Created On</th>
               <th className="px-6 py-3">Updated At</th>
               <th className="px-6 py-3">Subprojects</th>
+              <th className="px-6 py-3 text-right">Total Flatrate</th>
             </tr>
           </thead>
           <tbody>
             {filteredProjects.map((project, index) => (
               <React.Fragment key={project._id}>
                 <tr
-                  className={`${index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                    } hover:bg-gray-100 transition cursor-pointer`}
+                  className={`${
+                    index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                  } hover:bg-gray-100 transition cursor-pointer`}
                   onClick={() => toggleExpand(project._id)}
                 >
                   <td className="px-6 py-4 font-medium text-gray-900 flex items-center gap-2">
@@ -134,11 +141,14 @@ const SubprojectsContent = () => {
                     {new Date(project.updated_at).toLocaleString()}
                   </td>
                   <td className="px-6 py-4">{project.subprojects.length}</td>
+                  <td className="px-6 py-4 text-right font-semibold text-gray-900">
+                    ${calculateTotalFlatrate(project.subprojects).toFixed(2)}
+                  </td>
                 </tr>
 
                 {expanded[project._id] && project.subprojects.length > 0 && (
                   <tr>
-                    <td colSpan="5" className="bg-gray-50">
+                    <td colSpan="6" className="bg-gray-50">
                       <div className="px-10 py-4">
                         <table className="min-w-full text-sm border border-gray-200 rounded-lg">
                           <thead className="bg-gray-100 text-gray-900 text-xs uppercase tracking-wider">
@@ -146,6 +156,7 @@ const SubprojectsContent = () => {
                               <th className="px-4 py-2">Name</th>
                               <th className="px-4 py-2">Description</th>
                               <th className="px-4 py-2">Status</th>
+                              <th className="px-4 py-2 text-right">Flatrate</th>
                               <th className="px-4 py-2">Created On</th>
                               <th className="px-4 py-2">Updated At</th>
                             </tr>
@@ -164,13 +175,17 @@ const SubprojectsContent = () => {
                                 </td>
                                 <td className="px-4 py-2">
                                   <span
-                                    className={`px-3 py-1 rounded-full text-xs font-semibold ${sp.status === "active"
-                                      ? "bg-green-100 text-green-700"
-                                      : "bg-gray-100 text-gray-600"
-                                      }`}
+                                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                      sp.status === "active"
+                                        ? "bg-green-100 text-green-700"
+                                        : "bg-gray-100 text-gray-600"
+                                    }`}
                                   >
                                     {sp.status}
                                   </span>
+                                </td>
+                                <td className="px-4 py-2 text-right font-medium text-gray-900">
+                                  ${(sp.flatrate || 0).toFixed(2)}
                                 </td>
                                 <td className="px-4 py-2">
                                   {new Date(sp.created_on).toLocaleString()}

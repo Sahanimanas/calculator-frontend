@@ -13,7 +13,7 @@ const ProductivityContent = () => {
         const response = await fetch(
           `${apiUrl}/level/tiers`
         );
-        if (!response.ok) throw new Error("Failed to fetch data");
+        if (!response.ok) throw new Error("No productivity tiers found");
         const data = await response.json();
         setTiers(data);
       } catch (err) {
@@ -45,7 +45,13 @@ const ProductivityContent = () => {
 
   if (error)
     return (
-      <div className="text-center text-red-600 py-10">Error: {error}</div>
+     <div className="flex justify-center items-center py-10 text-gray-500">{error}</div>
+    );
+    if (!tiers.length)
+    return (
+      <div className="flex justify-center items-center py-10 text-gray-500">
+        No productivity tiers available.
+      </div>
     );
 
   return (

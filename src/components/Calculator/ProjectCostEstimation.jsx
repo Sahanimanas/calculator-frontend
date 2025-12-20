@@ -17,13 +17,24 @@ const ProjectCostEstimation = () => {
     const fetchProjects = async () => {
       try {
         const res = await axios.get(`${apiUrl}/project/project-subproject`);
-        setProjects(res.data);
+        
+        // Handle both paginated and non-paginated responses
+        const projectData = res.data.data || res.data;
+        
+        // Ensure it's an array
+        if (Array.isArray(projectData)) {
+          setProjects(projectData);
+        } else {
+          console.error("Expected array but got:", projectData);
+          setProjects([]);
+        }
       } catch (error) {
         console.error("Failed to fetch projects:", error);
+        setProjects([]);
       }
     };
     fetchProjects();
-  }, []);
+  }, [apiUrl]);
 
   // Selected project object
   const selectedProject = projects.find((p) => p.name === selectedProjectName);
