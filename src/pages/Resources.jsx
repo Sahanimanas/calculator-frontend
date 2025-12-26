@@ -35,37 +35,7 @@ const apiService = {
 
 // --- HELPER COMPONENTS ---
 
-const BillableToggle = ({ isBillable, onChange }) => {
-  const [checked, setChecked] = useState(isBillable);
-  useEffect(() => {
-    setChecked(isBillable);
-  }, [isBillable]);
-  const handleChange = () => {
-    const newState = !checked;
-    setChecked(newState);
-    if (onChange) onChange(newState);
-  };
-  return (
-    <label className="inline-flex items-center cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={handleChange}
-        className="sr-only peer"
-      />
-      <div className="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-accent transition-all relative">
-        <div className="w-4 h-4 bg-white rounded-full absolute top-0.5 left-0.5 transition-transform peer-checked:translate-x-5"></div>
-      </div>
-      <span
-        className={`ml-2 text-sm font-medium ${
-          checked ? "text-accent" : "text-gray-700"
-        }`}
-      >
-        {checked ? "Billable" : "Non-Billable"}
-      </span>
-    </label>
-  );
-};
+
 
 // --- MODAL COMPONENT (GENERIC FOR ADD/EDIT) ---
 // --- MODAL COMPONENT (GENERIC FOR ADD/EDIT) ---
