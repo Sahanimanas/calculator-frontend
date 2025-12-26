@@ -58,15 +58,16 @@ const Costing = () => {
   };
 
   // Debounce search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchTerm);
-      setCurrentPage(1);
-      setResources([]);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
+ // ✅ NEW (Fixed)
+useEffect(() => {
+  const timer = setTimeout(() => {
+    // Only update the search term. 
+    // If the term actually changed, the MAIN useEffect will detect it, 
+    // clear resources, and fetch new data automatically.
+    setDebouncedSearch(searchTerm);
+  }, 500);
+  return () => clearTimeout(timer);
+}, [searchTerm]);
   // Fetch projects & subprojects on mount
   useEffect(() => {
     const fetchProjects = async () => {
@@ -479,6 +480,7 @@ const Costing = () => {
                     <td className="py-3 px-4">
                       <input 
                         type="number" 
+                        min={0}
                         value={res.hours}
                         onChange={(e) => handleResourceChange(res.uniqueId, 'hours', e.target.value)}
                         disabled={!res.isEditable}

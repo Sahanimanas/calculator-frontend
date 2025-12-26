@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import axios from "axios";
 import {
   ArrowDownTrayIcon,
@@ -9,22 +9,30 @@ import {
   PencilSquareIcon,
   TrashIcon,
   XMarkIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from "@heroicons/react/24/outline";
 import { createPortal } from "react-dom";
 import ConfirmDeleteProjectModal from "../components/Project/ConfirmDeleteProjectModal";
 import toast from "react-hot-toast";
+import debounce from "lodash.debounce"; // Ensure you install: npm i lodash.debounce
+
 // --- API CONFIGURATION ---
-const apiBaseUrl = import.meta.env.VITE_BACKEND_URL; // Your backend URL
+const apiBaseUrl = import.meta.env.VITE_BACKEND_URL;
 
 // --- API SERVICE LAYER ---
 const apiService = {
-  getResources: () => axios.get(`${apiBaseUrl}/resource`),
+  // ✅ Pagination params support
+  getResources: (params) => axios.get(`${apiBaseUrl}/resource`, { params }),
+  
+  // ✅ Fetch projects (supports search/pagination if needed, currently fetching list)
   getProjects: () => axios.get(`${apiBaseUrl}/project`),
-  getSubprojects: () => axios.get(`${apiBaseUrl}/project/sub-project`),
-  addResource: (resourceData) =>
-    axios.post(`${apiBaseUrl}/resource`, resourceData),
-  updateResource: (id, resourceData) =>
-    axios.put(`${apiBaseUrl}/resource/${id}`, resourceData),
+  
+  // ✅ NEW: Fetch subprojects SPECIFIC to a project
+  getSubprojectsByProject: (projectId) => axios.get(`${apiBaseUrl}/project/${projectId}/subproject`),
+  
+  addResource: (data) => axios.post(`${apiBaseUrl}/resource`, data),
+  updateResource: (id, data) => axios.put(`${apiBaseUrl}/resource/${id}`, data),
   deleteResource: (id) => axios.delete(`${apiBaseUrl}/resource/${id}`),
   uploadResourceCSV: (formData) =>
     axios.post(`${apiBaseUrl}/upload-resource/bul`, formData, {
@@ -33,313 +41,18 @@ const apiService = {
     }),
 };
 
-// --- HELPER COMPONENTS ---
-
-
-
-// --- MODAL COMPONENT (GENERIC FOR ADD/EDIT) ---
-// --- MODAL COMPONENT (GENERIC FOR ADD/EDIT) ---
-const ResourceModal = ({
-  isOpen,
-  onClose,
-  resource,
-  onSave,
-  projects,
-  subprojects,
-}) => {
-  const initialFormState = {
-    name: "",
-    email: "",
-    role: "",
-    avatar_url: "",
-    assigned_projects: [],
-    assigned_subprojects: [],
-    isBillable: true,
-  };
-  const [formData, setFormData] = useState(initialFormState);
-  const [filteredSubprojects, setFilteredSubprojects] = useState([]);
-  const [isFormValid, setIsFormValid] = useState(false); // ✅ form validity
-  const isEditMode = !!resource;
-
-  useEffect(() => {
-    if (isEditMode && resource) {
-      setFormData({
-        name: resource.name || "",
-        email: resource.email || "",
-        role: resource.role || "",
-        avatar_url: resource.avatar_url || "",
-        assigned_projects:
-          resource.assigned_projects?.map((p) => p._id || p) || [],
-        assigned_subprojects:
-          resource.assigned_subprojects?.map((sp) => sp._id || sp) || [],
-        isBillable:
-          resource.isBillable !== undefined ? resource.isBillable : true,
-      });
-    } else {
-      setFormData(initialFormState);
-    }
-  }, [resource, isEditMode, isOpen]);
-
-  useEffect(() => {
-    if (formData.assigned_projects.length > 0) {
-      const related = subprojects.filter((sp) =>
-        formData.assigned_projects.includes(sp.project_id)
-      );
-      setFilteredSubprojects(related);
-    } else {
-      setFilteredSubprojects([]);
-    }
-  }, [formData.assigned_projects, subprojects]);
-
-  // ✅ Email validation
-  const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
-  // ✅ Enable/disable submit button
-  useEffect(() => {
-    const { name, role, email } = formData;
-    if (name.trim() && role.trim() && validateEmail(email)) {
-      setIsFormValid(true);
-    } else {
-      setIsFormValid(false);
-    }
-  }, [formData]);
-
-  if (!isOpen) return null;
-
-  const handleStandardChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleAssignmentChange = (type, e) => {
-    const id = e.target.value;
-    const formKey =
-      type === "project" ? "assigned_projects" : "assigned_subprojects";
-    if (!id || formData[formKey].includes(id)) return;
-    setFormData((prev) => ({ ...prev, [formKey]: [...prev[formKey], id] }));
-    e.target.value = "";
-  };
-
-  const removeAssignment = (type, idToRemove) => {
-    const formKey =
-      type === "project" ? "assigned_projects" : "assigned_subprojects";
-    setFormData((prev) => ({
-      ...prev,
-      [formKey]: prev[formKey].filter((id) => id !== idToRemove),
-    }));
-  };
-
-  const handleSubmit = () => {
-    if (!isFormValid) return; // prevent submit if invalid
-    onSave(formData, resource?._id);
-    onClose();
-  };
-
-  const unassignedProjects = projects.filter(
-    (p) => !formData.assigned_projects.includes(p._id)
-  );
-  const unassignedSubProjects = filteredSubprojects.filter(
-    (sp) => !formData.assigned_subprojects.includes(sp._id)
-  );
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-8 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 text-gray-400 hover:text-gray-600"
-        >
-          <XMarkIcon className="w-6 h-6" />
-        </button>
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">
-          {isEditMode ? "Edit Resource" : "Add New Resource"}
-        </h2>
-
-        <div className="space-y-4">
-          {/* Project & Subproject selection */}
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Select Projects
-                <sup className="relative left-1 text-[12px] text-red-700">
-                  *
-                </sup>
-              </label>
-              <select
-                onChange={(e) => handleAssignmentChange("project", e)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary mb-2"
-              >
-                <option value="">Assign Project...</option>
-                {unassignedProjects.map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <div className="space-y-2 max-h-24 overflow-y-auto">
-                {formData.assigned_projects.map((projectId) => (
-                  <div
-                    key={projectId}
-                    className="flex items-center justify-between bg-gray-100 rounded-md px-3 py-1 text-sm"
-                  >
-                    <span>
-                      {projects.find((p) => p._id === projectId)?.name}
-                    </span>
-                    <button
-                      onClick={() => removeAssignment("project", projectId)}
-                      className="text-gray-500 hover:text-red-500"
-                    >
-                      <XMarkIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Select Sub-projects
-                <sup className="relative left-1 text-[12px] text-red-700">
-                  *
-                </sup>
-              </label>
-              <select
-                onChange={(e) => handleAssignmentChange("subproject", e)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary mb-2"
-              >
-                <option value="">Assign Sub-project...</option>
-                {unassignedSubProjects.length > 0 ? (
-                  unassignedSubProjects.map((sp) => (
-                    <option key={sp._id} value={sp._id}>
-                      {sp.name}
-                    </option>
-                  ))
-                ) : (
-                  <option disabled>No subprojects available</option>
-                )}
-              </select>
-              <div className="space-y-2 max-h-24 overflow-y-auto">
-                {formData.assigned_subprojects.map((subProjectId) => (
-                  <div
-                    key={subProjectId}
-                    className="flex items-center justify-between bg-gray-100 rounded-md px-3 py-1 text-sm"
-                  >
-                    <span>
-                      {subprojects.find((sp) => sp._id === subProjectId)?.name}
-                    </span>
-                    <button
-                      onClick={() =>
-                        removeAssignment("subproject", subProjectId)
-                      }
-                      className="text-gray-500 hover:text-red-500"
-                    >
-                      <XMarkIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Other inputs */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm required font-medium text-gray-700 mb-1">
-                Full Name
-                <sup className="relative left-1 text-[12px] text-red-700">
-                  *
-                </sup>
-              </label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleStandardChange}
-                required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Role
-                <sup className="relative left-1 text-[12px] text-red-700">
-                  *
-                </sup>
-              </label>
-              <input
-                type="text"
-                name="role"
-                value={formData.role}
-                onChange={handleStandardChange}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email
-                <sup className="relative left-1 text-[12px] text-red-700">
-                  *
-                </sup>
-              </label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleStandardChange}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2"
-              />
-              {!validateEmail(formData.email) && formData.email && (
-                <p className="text-red-500 text-xs mt-1">
-                  Invalid email address
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Avatar URL (Optional)</label>
-            <input type="text" name="avatar_url" value={formData.avatar_url} onChange={handleStandardChange} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="https://example.com/avatar.jpg" />
-          </div> */}
-        </div>
-
-        <div className="flex justify-end gap-4 mt-8">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-semibold"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!isFormValid}
-            className={`px-6 py-2 rounded-lg font-semibold text-white ${
-              isFormValid
-                ? "bg-blue-500 hover:bg-blue-700"
-                : "bg-gray-300 cursor-not-allowed"
-            }`}
-          >
-            {isEditMode ? "Update Resource" : "Add Resource"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const DropdownList = ({ items }) => {
+// --- OPTIMIZED DROPDOWN LIST ---
+const DropdownList = ({ items, label }) => {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState("bottom");
-  const [coords, setCoords] = useState(null); // To store button coordinates for the portal
+  const [coords, setCoords] = useState({ left: 0, top: 0 });
   const ref = useRef(null);
-  const menuRef = useRef(null); // Ref for the menu itself
 
+  // Safely handle if items is null or undefined
   const arr = !items ? [] : Array.isArray(items) ? items : [items];
-
-  // Close the dropdown when clicking outside
+  
+  // Only attach listener when open
   useEffect(() => {
+    if (!open) return;
     const handleClickOutside = (e) => {
       if (ref.current && !ref.current.contains(e.target)) {
         setOpen(false);
@@ -347,301 +60,400 @@ const DropdownList = ({ items }) => {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Calculate position when the dropdown is opened
-  useEffect(() => {
-    if (open && ref.current) {
-      const rect = ref.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-
-      // A reasonable estimate for menu height to decide placement
-      const estimatedMenuHeight = 150;
-
-      // Decide whether to open above or below
-      const newPosition =
-        spaceBelow < estimatedMenuHeight && rect.top > spaceBelow
-          ? "top"
-          : "bottom";
-      setPosition(newPosition);
-
-      // Set coordinates for the portal
-      setCoords({
-        left: rect.left,
-        top: rect.top,
-        bottom: rect.bottom,
-        width: rect.width,
-      });
-    }
   }, [open]);
 
-  if (!arr.length) return <span className="text-gray-500">Unassigned</span>;
+  const toggleDropdown = () => {
+    if (!open && ref.current) {
+        const rect = ref.current.getBoundingClientRect();
+        setCoords({
+            left: rect.left,
+            top: rect.bottom + window.scrollY + 4,
+            width: rect.width
+        });
+    }
+    setOpen((v) => !v);
+  }
 
-  const displayText =
-    arr.length === 1 ? arr[0] : `${arr[0]} +${arr.length - 1}`;
+  if (!arr.length) return <span className="text-gray-400 text-sm italic">None</span>;
 
-  const DropdownMenu = (
-    <div
-      ref={menuRef}
-      style={{
-        position: "fixed",
-        left: `${coords?.left ?? 0}px`,
-        // Position below the button or above it
-        top: position === "bottom" ? `${(coords?.bottom ?? 0) + 4}px` : "",
-        bottom:
-          position === "top"
-            ? `${window.innerHeight - (coords?.top ?? 0) + 4}px`
-            : "",
-        width: "224px", // 14rem, from original w-56 class
-        zIndex: 10000, // Ensure it's above everything
-      }}
-      className="bg-white border border-gray-200 rounded-md shadow-lg"
-    >
-      <ul
-        className="text-sm text-gray-800"
-        style={{
-          maxHeight: "12rem",
-          overflowY: "auto",
-        }}
-      >
-        {arr.map((item, idx) => (
-          <li key={idx} className="px-3 py-2 hover:bg-gray-100 cursor-pointer">
-            {item}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+  const displayText = arr.length === 1 ? arr[0] : `${arr[0]} +${arr.length - 1}`;
 
   return (
-    <div className="inline-block" ref={ref}>
+    <div className="relative inline-block" ref={ref}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center align-left gap-1 px-4 py-1 border border-gray-300 rounded-md hover:bg-gray-100 text-sm text-gray-700"
+        onClick={toggleDropdown}
+        className="flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors max-w-[200px]"
       >
-        <span className="truncate max-w-[180px] font-semibold block">
+        <span className="truncate text-sm text-gray-700 block text-left flex-1">
           {displayText}
         </span>
-        <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+        <ChevronDownIcon className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && coords && createPortal(DropdownMenu, document.body)}
+      {open && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            left: `${coords.left}px`,
+            top: `${coords.top}px`,
+            zIndex: 9999,
+            minWidth: "200px"
+          }}
+          className="bg-white rounded-lg shadow-xl border border-gray-100 py-1 animate-in fade-in zoom-in-95 duration-100"
+        >
+           <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
+             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label || 'Items'}</span>
+           </div>
+          <ul className="max-h-60 overflow-y-auto py-1">
+            {arr.map((item, idx) => (
+              <li key={idx} className="px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 cursor-pointer">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
 
-// --- MAIN CONTENT COMPONENT ---
+// --- MODAL COMPONENT (Optimized for On-Demand Fetching) ---
+const ResourceModal = ({
+  isOpen,
+  onClose,
+  resource,
+  onSave,
+  projects, // Pass full list of projects
+}) => {
+  const initialFormState = {
+    name: "",
+    email: "",
+    role: "",
+    assigned_projects: [],
+    assigned_subprojects: [],
+  };
+  const [formData, setFormData] = useState(initialFormState);
+  
+  // ✅ Store available subprojects mapped by Project ID: { projectId: [sub1, sub2] }
+  const [availableSubprojects, setAvailableSubprojects] = useState({});
+  const [loadingSubprojects, setLoadingSubprojects] = useState(false);
+  
+  const isEditMode = !!resource;
+
+  // Initialize Form Data
+  useEffect(() => {
+    if (isEditMode && resource) {
+      setFormData({
+        name: resource.name || "",
+        email: resource.email || "",
+        role: resource.role || "",
+        // Store IDs
+        assigned_projects: resource.assigned_projects?.map((p) => p._id || p) || [],
+        assigned_subprojects: resource.assigned_subprojects?.map((sp) => sp._id || sp) || [],
+      });
+    } else {
+      setFormData(initialFormState);
+    }
+  }, [resource, isEditMode, isOpen]);
+
+  // ✅ Fetch subprojects when a project is selected (if not already fetched)
+  useEffect(() => {
+    const fetchSubForSelectedProjects = async () => {
+        if (!isOpen) return;
+        
+        // Find projects that we haven't fetched subprojects for yet
+        const projectsToFetch = formData.assigned_projects.filter(pid => !availableSubprojects[pid]);
+        
+        if (projectsToFetch.length === 0) return;
+
+        setLoadingSubprojects(true);
+        const newSubprojects = { ...availableSubprojects };
+
+        await Promise.all(projectsToFetch.map(async (pid) => {
+            try {
+                const res = await apiService.getSubprojectsByProject(pid);
+                newSubprojects[pid] = res.data;
+            } catch (err) {
+                console.error(`Failed to fetch subprojects for project ${pid}`, err);
+                newSubprojects[pid] = [];
+            }
+        }));
+
+        setAvailableSubprojects(newSubprojects);
+        setLoadingSubprojects(false);
+    };
+
+    fetchSubForSelectedProjects();
+  }, [formData.assigned_projects, isOpen]);
+
+  const handleStandardChange = (e) => {
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleProjectSelect = (e) => {
+    const projectId = e.target.value;
+    if (!projectId || formData.assigned_projects.includes(projectId)) return;
+    
+    setFormData(prev => ({
+        ...prev,
+        assigned_projects: [...prev.assigned_projects, projectId]
+    }));
+    e.target.value = "";
+  };
+
+  const handleSubprojectSelect = (e) => {
+    const subId = e.target.value;
+    if (!subId || formData.assigned_subprojects.includes(subId)) return;
+    
+    setFormData(prev => ({
+        ...prev,
+        assigned_subprojects: [...prev.assigned_subprojects, subId]
+    }));
+    e.target.value = "";
+  };
+
+  const removeAssignment = (type, id) => {
+    if (type === 'project') {
+        setFormData(prev => ({
+            ...prev,
+            assigned_projects: prev.assigned_projects.filter(p => p !== id),
+            // Optional: Remove subprojects associated with this project? 
+            // For now, keeping them is safer or implementing complex logic to filter them out.
+        }));
+    } else {
+        setFormData(prev => ({
+            ...prev,
+            assigned_subprojects: prev.assigned_subprojects.filter(sp => sp !== id)
+        }));
+    }
+  };
+
+  const handleSubmit = () => {
+    onSave(formData, resource?._id);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  // Flatten available subprojects for the dropdown based on assigned projects
+  const activeSubprojectOptions = formData.assigned_projects.flatMap(pid => availableSubprojects[pid] || []);
+  
+  // Filter out already selected
+  const availableProjectsList = projects.filter(p => !formData.assigned_projects.includes(p._id));
+  const availableSubprojectsList = activeSubprojectOptions.filter(sp => !formData.assigned_subprojects.includes(sp._id));
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-8 relative max-h-[90vh] overflow-y-auto">
+        <button onClick={onClose} className="absolute top-6 right-6 text-gray-400 hover:text-gray-600">
+          <XMarkIcon className="w-6 h-6" />
+        </button>
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">
+          {isEditMode ? "Edit Resource" : "Add New Resource"}
+        </h2>
+
+        <div className="space-y-6">
+          {/* Projects */}
+          <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Assign Projects</label>
+              <select onChange={handleProjectSelect} className="w-full border rounded-lg px-3 py-2 mb-2">
+                <option value="">Select Project...</option>
+                {availableProjectsList.map(p => (
+                  <option key={p._id} value={p._id}>{p.name}</option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-2">
+                {formData.assigned_projects.map(pid => {
+                    const pName = projects.find(p => p._id === pid)?.name || 'Unknown';
+                    return (
+                        <span key={pid} className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-sm flex items-center gap-1">
+                            {pName}
+                            <XMarkIcon onClick={() => removeAssignment('project', pid)} className="w-3 h-3 cursor-pointer" />
+                        </span>
+                    )
+                })}
+              </div>
+          </div>
+
+          {/* Subprojects - Dependent on Projects */}
+          <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Assign Sub-projects 
+                  {loadingSubprojects && <span className="text-xs text-gray-500 ml-2">(Loading options...)</span>}
+              </label>
+              <select 
+                onChange={handleSubprojectSelect} 
+                className="w-full border rounded-lg px-3 py-2 mb-2"
+                disabled={formData.assigned_projects.length === 0}
+              >
+                <option value="">
+                    {formData.assigned_projects.length === 0 ? "Select a Project first" : "Select Sub-project..."}
+                </option>
+                {availableSubprojectsList.map(sp => (
+                  <option key={sp._id} value={sp._id}>{sp.name}</option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                {formData.assigned_subprojects.map(spId => {
+                    // Try to find name in fetched options, or fallback to 'Loading/Unknown' if filtering old data
+                    const spObj = activeSubprojectOptions.find(o => o._id === spId) 
+                                  || resource?.assigned_subprojects?.find(r => r._id === spId);
+                    return (
+                        <span key={spId} className="bg-green-50 text-green-700 px-2 py-1 rounded text-sm flex items-center gap-1">
+                            {spObj ? spObj.name : '...'}
+                            <XMarkIcon onClick={() => removeAssignment('subproject', spId)} className="w-3 h-3 cursor-pointer" />
+                        </span>
+                    )
+                })}
+              </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input name="name" value={formData.name} onChange={handleStandardChange} className="w-full border rounded-lg px-3 py-2" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <input name="role" value={formData.role} onChange={handleStandardChange} className="w-full border rounded-lg px-3 py-2" required />
+            </div>
+          </div>
+          <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input type="email" name="email" value={formData.email} onChange={handleStandardChange} className="w-full border rounded-lg px-3 py-2" required />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-4 mt-8">
+          <button onClick={onClose} className="px-6 py-2 border rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+          <button onClick={handleSubmit} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            {isEditMode ? "Update" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN PAGE ---
 export default function ResourcesPage() {
   const [resources, setResources] = useState([]);
-  const [resourceId, setResourceId] = useState();
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [projects, setProjects] = useState([]);
-  const [subprojects, setSubprojects] = useState([]);
-  const [confirmDeleteResource, setConfirmDeleteResource] = useState(false);
+  
+  // ✅ Removed `subprojects` state (too big). We fetch specific lists for filters.
+  const [filterSubprojects, setFilterSubprojects] = useState([]); 
+
   const [isLoading, setIsLoading] = useState(true);
-  const [modalState, setModalState] = useState({ type: null, data: null }); // type: 'add' or 'edit'
+  const [modalState, setModalState] = useState({ type: null, data: null });
+  const [resourceId, setResourceId] = useState();
+  const [confirmDeleteResource, setConfirmDeleteResource] = useState(false);
+
+  // Filters
   const [filters, setFilters] = useState({
-    project: "",
-    subProject: "",
-    billableStatus: "",
-    search: "", // ✅ NEW
+    project_id: "",
+    subproject_id: "",
+    search: "",
   });
-  const [subprojectOptions, setSubprojectOptions] = useState([]);
-  const fetchData = async () => {
+
+  // 1. Initial Load: Get Projects only
+  useEffect(() => {
+    const fetchProjects = async () => {
+        try {
+            const res = await apiService.getProjects();
+            setProjects(res.data);
+        } catch (e) { console.error("Project fetch failed", e); }
+    };
+    fetchProjects();
+  }, []);
+
+  // 2. Fetch Resources (Paginated)
+  const fetchResources = async () => {
     setIsLoading(true);
     try {
-      const [res, proj, subproj] = await Promise.all([
-        apiService.getResources(),
-        apiService.getProjects(),
-        apiService.getSubprojects(),
-      ]);
-      setResources(res.data);
-      setProjects(proj.data);
-      setSubprojects(subproj.data);
+      const params = {
+        page: pagination.page,
+        limit: 20,
+        ...filters
+      };
+      const res = await apiService.getResources(params);
+      setResources(res.data.data || []); 
+      setPagination(prev => ({ ...prev, ...res.data.pagination }));
     } catch (error) {
-      console.error("Failed to fetch data:", error);
+      toast.error("Failed to load resources");
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Debounce search
+  const debouncedFetch = useCallback(debounce(() => {
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchResources();
+  }, 500), [filters]);
+
   useEffect(() => {
-    fetchData();
-  }, []);
-  // console.log(projects)
-  const handleSaveResource = async (formData, resourceId) => {
-    try {
-      if (resourceId) {
-        // Update mode
-        await apiService.updateResource(resourceId, formData);
-      } else {
-        // Add mode
-        await apiService.addResource(formData);
-      }
-      fetchData(); // Refresh data after save
-    } catch (error) {
-      console.error("Failed to save resource:", error);
-    }
-  };
-  function getResourceName(resourceId) {
-    console.log("callee");
+     fetchResources();
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page]); 
 
-    const found = resources.find(
-      (r) => r._id== resourceId
-    );
-
-    return found ? found.name : "Unknown";
-  }
-
-  const handleDeleteResource = async (id) => {
-    try {
-      await apiService.deleteResource(id);
-      fetchData(); // Refresh data
-    } catch (error) {
-      console.error("Failed to delete resource:", error);
-    }
-    setConfirmDeleteResource(false);
-  };
-
+  // 3. Handle Filter Changes
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
-    setFilters((prev) => ({ ...prev, [name]: value }));
-  };
-  useEffect(() => {
-    if (filters.project) {
-      const relatedSubprojects = subprojects.filter(
-        (sp) => sp.project_id === filters.project
-      );
-      setSubprojectOptions(relatedSubprojects);
+    
+    // If project changes, reset subproject filter
+    if (name === 'project_id') {
+        setFilters(prev => ({ ...prev, project_id: value, subproject_id: "" }));
+        setPagination(prev => ({ ...prev, page: 1 }));
+        // Fetch subprojects for this specific filter
+        if (value) {
+            apiService.getSubprojectsByProject(value)
+                .then(res => setFilterSubprojects(res.data))
+                .catch(() => setFilterSubprojects([]));
+        } else {
+            setFilterSubprojects([]);
+        }
     } else {
-      setSubprojectOptions(subprojects);
+        setFilters(prev => ({ ...prev, [name]: value }));
+        if (name === 'search') debouncedFetch();
+        else setPagination(prev => ({ ...prev, page: 1 }));
     }
-  }, [filters.project, subprojects]);
-
-  // utils.js (or within component)
-  const getDisplayNames = (ids, allItems) => {
-    // Normalize: if ids is a single value, wrap it in an array
-    if (!ids) return [];
-
-    const idArray = Array.isArray(ids) ? ids : [ids];
-
-    return idArray.map((id) => {
-      // id could be an object with _id, or just an id string
-      const rawId = (id && (id._id || id.id)) || id;
-      if (!rawId) return "Unknown";
-
-      const found = Array.isArray(allItems)
-        ? allItems.find((item) => (item._id || item.id || item) == rawId)
-        : null;
-
-      return found ? found.name || String(found) : "Unknown";
-    });
   };
-  const handleCSVUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
 
-    if (file.type !== "text/csv") {
-      alert("Please upload a valid CSV file");
-      return;
-    }
+  // Trigger fetch on dropdown change (non-search)
+  useEffect(() => {
+      if (!filters.search) fetchResources();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.project_id, filters.subproject_id]);
 
-    const formData = new FormData();
-    formData.append("file", file);
 
-  toast.loading("Uploading CSV...");
+  const handleSaveResource = async (formData, id) => {
     try {
-      const res = await apiService.uploadResourceCSV(formData);
-
-      const contentType = res.headers["content-type"];
-
-      // ---- SUCCESS CASE ----
-      if (contentType.includes("application/json")) {
-        const text = await res.data.text();
-        const json = JSON.parse(text);
-
-         toast.dismiss();
-      toast.success("CSV uploaded successfully!");
-        fetchData();
-        return;
-      }
-    } catch (err) {
-      // ---- ERROR CSV FILE ----
-      if (
-        err?.response?.status === 400 &&
-        err.response.headers["content-type"]?.includes("text/csv")
-      ) {
-        const blob = err.response.data;
-
-        const fileName =
-          err.response.headers["content-disposition"]?.split("filename=")[1] ||
-          "resource-upload-errors.csv";
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        a.click();
-         toast.dismiss();
-         toast.error("CSV contains errors. Please check the downloaded file.");
-        return;
-      }
-       toast.dismiss();
-       toast.error("err");
-    } finally {
-      event.target.value = "";
+      if (id) await apiService.updateResource(id, formData);
+      else await apiService.addResource(formData);
+      fetchResources();
+      toast.success(id ? "Resource updated" : "Resource created");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Operation failed");
     }
   };
 
-  const handleDownloadTemplate = () => {
-    const csvHeader = "name,email,role,projects,subprojects\n";
+  const handleDelete = async () => {
+    try {
+        await apiService.deleteResource(resourceId);
+        fetchResources();
+        toast.success("Deleted successfully");
+    } catch(e) { toast.error("Delete failed"); }
+    setConfirmDeleteResource(false);
+  }
 
-    const blob = new Blob([csvHeader], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "resource-template.csv";
-    a.click();
-
-    URL.revokeObjectURL(url);
+  const handlePageChange = (newPage) => {
+      if (newPage > 0 && newPage <= pagination.totalPages) {
+          setPagination(prev => ({ ...prev, page: newPage }));
+      }
   };
-
-  const filteredResources = resources.filter((res) => {
-    const { project, subProject, billableStatus, search } = filters;
-
-    if (
-      project &&
-      !(res.assigned_projects || []).map((p) => p._id).includes(project)
-    )
-      return false;
-    if (
-      subProject &&
-      !(res.assigned_subprojects || []).map((sp) => sp._id).includes(subProject)
-    )
-      return false;
-    if (billableStatus) {
-      const isBillable = billableStatus === "billable";
-      if (res.isBillable !== isBillable) return false;
-    }
-
-    // ✅ Search filter (case-insensitive)
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      const matches =
-        res.name?.toLowerCase().includes(s) ||
-        res.email?.toLowerCase().includes(s) ||
-        res.role?.toLowerCase().includes(s);
-      if (!matches) return false;
-    }
-
-    return true;
-  });
-
-  const billableCount = filteredResources.filter(
-    (res) => res.isBillable
-  ).length;
-  const nonBillableCount = filteredResources.length - billableCount;
 
   return (
     <>
@@ -650,251 +462,106 @@ export default function ResourcesPage() {
         onClose={() => setModalState({ type: null, data: null })}
         resource={modalState.data}
         onSave={handleSaveResource}
-        projects={projects}
-        subprojects={subprojects}
+        projects={projects} 
+        // Note: We do NOT pass subprojects list here anymore. The modal fetches what it needs.
       />
-      <div id="main-content" className="flex-1 p-4">
-        <header id="header" className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Resource Assignment
-              </h1>
-              <p className="text-gray-500">
-                Assign resources to projects and sub-projects, and toggle their
-                inclusion in billing
-              </p>
-            </div>
-            <div className="flex items-center space-x-4">
-              {/* 📥 DOWNLOAD TEMPLATE */}
-              <button
-                onClick={handleDownloadTemplate}
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-gray-200"
-              >
-                <ArrowDownTrayIcon className="w-5 h-5" />
-                <span>Download Template</span>
-              </button>
 
-              {/* 📤 UPLOAD CSV */}
-              <label className="cursor-pointer bg-gray-100 text-gray-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-gray-200">
-                <ArrowUpTrayIcon className="w-5 h-5" />
-                <span>Upload CSV</span>
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCSVUpload}
-                  className="hidden"
-                />
-              </label>
-
-              {/* ➕ ADD NEW RESOURCE */}
-              <button
-                onClick={() => setModalState({ type: "add", data: null })}
-                className="bg-blue-300 text-gray-900 px-4 py-2 rounded-xl text-lg flex items-center space-x-2 hover:bg-blue-400"
-              >
-                <PlusIcon className="w-7 h-7" />
-                <span>Add Resource</span>
-              </button>
-
-              <button className="bg-accent text-white px-4 py-2 rounded-xl flex items-center space-x-2">
-                <ArchiveBoxIcon className="w-5 h-5" />
-                <span>Save All</span>
-              </button>
-            </div>
-          </div>
+      <div className="flex-1 p-4">
+        {/* Header */}
+        <header className="bg-white rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">
+            <h1 className="text-2xl font-bold text-gray-900">Resource Assignment</h1>
+            <button onClick={() => setModalState({ type: "add", data: null })} className="bg-blue-500 text-white px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-blue-600">
+                <PlusIcon className="w-5 h-5" /> Add Resource
+            </button>
         </header>
 
-        <div
-          id="filters-section"
-          className="bg-white rounded-2xl shadow-lg p-6 mb-6"
-        >
-          <div className="flex items-center justify-between">
-            <div className="grid grid-cols-4 gap-6 flex-1">
-              {" "}
-              {/* changed from 3 to 4 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Project
-                </label>
-                <select
-                  name="project"
-                  value={filters.project}
-                  onChange={handleFilterChange}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
-                >
-                  <option value="">All Projects</option>
-                  {projects.map((p) => (
-                    <option key={p._id} value={p._id}>
-                      {p.name}
-                    </option>
-                  ))}
+        {/* Filters */}
+        <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 grid grid-cols-3 gap-6">
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Project</label>
+                <select name="project_id" value={filters.project_id} onChange={handleFilterChange} className="w-full border rounded-xl px-4 py-2">
+                    <option value="">All Projects</option>
+                    {projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Sub-Project
-                </label>
-                <select
-                  name="subProject"
-                  value={filters.subProject}
-                  onChange={handleFilterChange}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+            </div>
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Sub-Project</label>
+                <select 
+                    name="subproject_id" 
+                    value={filters.subproject_id} 
+                    onChange={handleFilterChange} 
+                    className="w-full border rounded-xl px-4 py-2 disabled:bg-gray-100 disabled:text-gray-400"
+                    disabled={!filters.project_id} // ✅ Disable if no project selected
                 >
-                  <option value="">All Sub-Projects</option>
-                  {subprojectOptions.map((sp) => (
-                    <option key={sp._id} value={sp._id}>
-                      {sp.name}
-                    </option>
-                  ))}
+                    <option value="">{filters.project_id ? "All Sub-Projects" : "Select Project First"}</option>
+                    {filterSubprojects.map(sp => <option key={sp._id} value={sp._id}>{sp.name}</option>)}
                 </select>
-              </div>
-              {/* ✅ NEW: Resource search */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Search Resource
-                </label>
-                <input
-                  type="text"
-                  name="search"
-                  value={filters.search}
-                  onChange={handleFilterChange}
-                  placeholder="Search by name, role, or email..."
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
-                />
-              </div>
             </div>
-
-            <div className="ml-6">
-              <span className="inline-flex items-center px-3 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
-                Total: {filteredResources.length} Resources
-              </span>
+            <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+                <input type="text" name="search" onChange={handleFilterChange} placeholder="Search..." className="w-full border rounded-xl px-4 py-2" />
             </div>
-          </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-md overflow-hidden max-h-[67vh]  flex flex-col border">
-          <div className="overflow-y-auto flex-1">
-            <table className="w-full">
-              <thead className="bg-gray-50 z-99 sticky top-0">
-                <tr>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
-                    Resource
-                  </th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
-                    Assigned Project
-                  </th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
-                    Sub-Project
-                  </th>
-                  {/* <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">Billable Toggle</th> */}
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan="5" className="text-center py-8 text-gray-500">
-                      Loading resources...
-                    </td>
-                  </tr>
-                ) : (
-                  filteredResources.map((res) => (
-                    <tr key={res._id} className="hover:bg-gray-50">
-                      <td className="px-6 py-2 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <img
-                            src={
-                              res.avatar_url ||
-                              "https://storage.googleapis.com/uxpilot-auth.appspot.com/avatars/avatar-0.jpg"
-                            }
-                            alt="User"
-                            className="w-8 h-8 rounded-full mr-3"
-                          />
-                          <span className="text-sm font-medium text-gray-900">
-                            {res.name}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4  whitespace-nowrap text-sm text-gray-800">
-                        <DropdownList
-                          items={getDisplayNames(
-                            res.assigned_projects,
-                            projects
-                          )}
-                          label="Projects"
-                        />
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
-                        <DropdownList
-                          items={getDisplayNames(
-                            res.assigned_subprojects,
-                            subprojects
-                          )}
-                          label="Sub-Projects"
-                        />
-                      </td>
-
-                      {/* <td className="px-6 py-2 whitespace-nowrap">
-                                                <BillableToggle isBillable={res.isBillable} onChange={(val) => handleSaveResource({ ...res, isBillable: val }, res._id)} />
-                                            </td> */}
-                      <td className="px-6 py-2 whitespace-nowrap">
-                        <div className="flex items-center space-x-3">
-                          <button
-                            onClick={() =>
-                              setModalState({ type: "edit", data: res })
-                            }
-                            className="text-primary hover:text-blue-700"
-                          >
-                            <PencilSquareIcon className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setConfirmDeleteResource(true);
-                              setResourceId(res._id);
-                            }}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <TrashIcon className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          <ConfirmDeleteProjectModal
-            isOpen={confirmDeleteResource}
-            onClose={() => setConfirmDeleteResource(false)}
-            projectName={getResourceName(resourceId)}
-            onConfirm={() => handleDeleteResource(resourceId)}
-          />
-          <div className="bg-gray-50 border-t border-gray-200 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-6">
-                {/* <div className="flex items-center space-x-2"><div className="w-3 h-3 bg-accent rounded-full"></div><span className="text-sm font-medium text-gray-700">Billable: <span className="text-accent font-semibold">{billableCount}</span></span></div>
-                                <div className="flex items-center space-x-2"><div className="w-3 h-3 bg-gray-400 rounded-full"></div><span className="text-sm font-medium text-gray-700">Non-Billable: <span className="text-gray-600 font-semibold">{nonBillableCount}</span></span></div> */}
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-gray-700">
-                    Total:{" "}
-                    <span className="text-gray-900 font-semibold">
-                      {filteredResources.length}
-                    </span>
-                  </span>
-                </div>
-              </div>
-              {/* <div className="flex items-center space-x-4 text-xs text-gray-500">
-                                <span>Inherited: 20</span>
-                                <span>Overridden: 4</span>
-                            </div> */}
+        {/* Table */}
+        <div className="bg-white rounded-2xl shadow-md overflow-hidden flex flex-col border">
+            <div className="overflow-x-auto">
+                <table className="w-full">
+                    <thead className="bg-gray-50">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Resource</th>
+                            <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Projects</th>
+                            <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Sub-Projects</th>
+                            <th className="px-6 py-3 text-left text-sm font-medium text-gray-500">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                        {isLoading ? <tr><td colSpan="4" className="text-center py-8">Loading...</td></tr> : 
+                         resources.map(res => (
+                            <tr key={res._id} className="hover:bg-gray-50">
+                                <td className="px-6 py-4">
+                                    <div className="flex items-center">
+                                        <img src={res.avatar_url || "https://placehold.co/40"} className="w-8 h-8 rounded-full mr-3" alt="" />
+                                        <div>
+                                            <div className="text-sm font-medium">{res.name}</div>
+                                            <div className="text-xs text-gray-500">{res.role}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4">
+                                    {/* ✅ Use populated data directly */}
+                                    <DropdownList items={res.assigned_projects?.map(p => p.name)} label="Projects" />
+                                </td>
+                                <td className="px-6 py-4">
+                                    <DropdownList items={res.assigned_subprojects?.map(sp => sp.name)} label="Sub-Projects" />
+                                </td>
+                                <td className="px-6 py-4 flex gap-3">
+                                    <button onClick={() => setModalState({ type: "edit", data: res })} className="text-blue-600"><PencilSquareIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => { setConfirmDeleteResource(true); setResourceId(res._id); }} className="text-red-500"><TrashIcon className="w-5 h-5"/></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
-          </div>
+
+            {/* Pagination Footer */}
+            <div className="bg-gray-50 border-t px-6 py-4 flex justify-between items-center">
+                <span className="text-sm text-gray-700">Page {pagination.page} of {pagination.totalPages}</span>
+                <div className="flex gap-2">
+                    <button disabled={pagination.page <= 1} onClick={() => handlePageChange(pagination.page - 1)} className="p-2 border rounded hover:bg-gray-200 disabled:opacity-50"><ChevronLeftIcon className="w-4 h-4"/></button>
+                    <button disabled={pagination.page >= pagination.totalPages} onClick={() => handlePageChange(pagination.page + 1)} className="p-2 border rounded hover:bg-gray-200 disabled:opacity-50"><ChevronRightIcon className="w-4 h-4"/></button>
+                </div>
+            </div>
         </div>
       </div>
+      
+      <ConfirmDeleteProjectModal 
+        isOpen={confirmDeleteResource} 
+        onClose={() => setConfirmDeleteResource(false)} 
+        projectName="Resource" 
+        onConfirm={handleDelete} 
+      />
     </>
   );
 }
