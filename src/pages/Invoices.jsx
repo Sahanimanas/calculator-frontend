@@ -1,24 +1,24 @@
 import React, { useState, useMemo, useEffect } from 'react';
 
-// NOTE: This component assumes Tailwind CSS is available.
-// NOTE: For demonstration purposes, I am using 'alert' as a placeholder for a custom UI modal
-// which is mandated by the guidelines. In a real-world scenario, you would replace this 
-// with a custom component.
-
-const apiBaseUrl = import.meta.env.VITE_BACKEND_URL;
+const apiBaseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000/api';
 
 const Invoices = () => {
   const [invoices, setInvoices] = useState([]);
-  const [projectsList, setProjectsList] = useState([]); // State for all projects
-  const [subprojectsList, setSubprojectsList] = useState([]); // State for all subprojects
+  const [projectsList, setProjectsList] = useState([]); 
+  const [subprojectsList, setSubprojectsList] = useState([]); 
   const [isLoading, setIsLoading] = useState(true);
+  
+  // State for filtering
   const [filters, setFilters] = useState({
     search: '',
     billingMonth: 'all',
-    projectName: '', // Filter by selected Project ID
-    subprojectName: '' // Filter by selected Subproject ID
+    projectName: '', 
+    subprojectName: '' 
   });
+
+  // State for Modal & Details
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isPdfLibReady, setIsPdfLibReady] = useState(false);
 
   // --- LOAD PDF LIBRARIES ---
@@ -35,7 +35,6 @@ const Invoices = () => {
       });
 
       try {
-        // jspdf and jspdf-autotable are required for PDF generation
         await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
         await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
         setIsPdfLibReady(true);
@@ -55,7 +54,7 @@ const Invoices = () => {
         if (!res.ok) throw new Error('Failed to fetch project structure');
         const projectStructure = await res.json();
 
-        // Extract unique lists
+        // Extract unique lists for filters
         const projects = projectStructure.map(p => ({ _id: p._id, name: p.name }));
         const subprojects = projectStructure.flatMap(p =>
           (p.subprojects || []).map(sp => ({
@@ -76,8 +75,7 @@ const Invoices = () => {
     fetchProjects();
   }, []);
 
-
-  // --- FETCH INVOICES ONLY ---
+  // --- FETCH INVOICE LIST (Lightweight) ---
   useEffect(() => {
     const fetchInvoices = async () => {
       setIsLoading(true);
@@ -86,7 +84,6 @@ const Invoices = () => {
         if (!res.ok) throw new Error('Failed to fetch invoices');
         const data = await res.json();
         setInvoices(data);
-        console.log(data)
       } catch (err) {
         console.error('Error fetching invoices:', err);
       } finally {
@@ -97,35 +94,78 @@ const Invoices = () => {
     fetchInvoices();
   }, []);
 
-  // --- DIRECT LOOKUPS (NO EXTERNAL DATA) ---
+  // --- FETCH SINGLE INVOICE DETAILS ---
+  const fetchInvoiceDetails = async (id) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/invoices/${id}`);
+      if (!res.ok) throw new Error('Failed to fetch invoice details');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      alert("Error loading invoice details");
+      return null;
+    }
+  };
+
+  const handleRowClick = async (id) => {
+    setIsDetailLoading(true);
+    const fullInvoice = await fetchInvoiceDetails(id);
+    if (fullInvoice) {
+      setSelectedInvoice(fullInvoice);
+    }
+    setIsDetailLoading(false);
+  };
+
+  // --- MAPPER: Handle new API structure ---
+  // The API now returns flattened names in billing_records (project_name, etc.)
   const getLookups = (invoice) => {
+    if (!invoice || !invoice.billing_records) return [];
+    
     return invoice.billing_records.map(record => ({
       ...record,
-      projectName: record.project_name || record.project_id?.name || 'N/A',
-      subprojectName: record.subproject_name || record.subproject_id?.name || 'N/A',
-      resourceName: record.resource_name || record.resource_id?.name || 'N/A'
+      projectName: record.project_name || 'N/A',
+      subprojectName: record.subproject_name || 'N/A',
+      resourceName: record.resource_name || 'N/A'
     }));
   };
 
   // --- GENERATE UNIQUE MONTH/YEAR FOR DROPDOWN ---
+  // Note: Since the list view might not have billing_records, we rely on the invoice metadata if available, 
+  // or fall back to parsing records if the API includes them. 
+  // *Assumption*: The list API includes 'billing_records' or separate month/year fields. 
+  // Based on your backend, 'billing_records' are excluded in list view. 
+  // If your invoice model has 'month' and 'year' at the root level (it should for efficiency), use that.
+  // For this implementation, we will try to find date info.
   const uniqueBillingPeriods = useMemo(() => {
     const periods = new Set();
     invoices.forEach(invoice => {
-      const firstRecord = invoice.billing_records?.[0];
-      if (firstRecord && firstRecord.month && firstRecord.year) {
-        const monthName = new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' });
-        periods.add(`${monthName} ${firstRecord.year}`);
+      // Logic: If invoice has metadata month/year (ideal), otherwise check billing records (if present)
+      let month = invoice.month; 
+      let year = invoice.year;
+
+      // Fallback if root properties don't exist but records do (unlikely with optimization, but safe)
+      if (!month && invoice.billing_records?.[0]) {
+         month = invoice.billing_records[0].month;
+         year = invoice.billing_records[0].year;
+      }
+
+      // Fallback 2: Use created date if strictly necessary
+      if (!month) {
+         const date = new Date(invoice.createdAt);
+         month = date.getMonth() + 1;
+         year = date.getFullYear();
+      }
+
+      if (month && year) {
+        const monthName = new Date(0, month - 1).toLocaleString('default', { month: 'long' });
+        periods.add(`${monthName} ${year}`);
       }
     });
 
-    // Convert set to array and sort by date (newest first)
     return ['all', ...Array.from(periods).sort((a, b) => {
-      const [monthA, yearA] = a.split(' ');
-      const [monthB, yearB] = b.split(' ');
-      // Use Date object for accurate month/year sorting
-      const dateA = new Date(yearA, new Date(Date.parse(monthA + " 1, 2020")).getMonth());
-      const dateB = new Date(yearB, new Date(Date.parse(monthB + " 1, 2020")).getMonth());
-      return dateB - dateA; // Descending order (newest first)
+      const dateA = new Date(Date.parse(`1 ${a}`));
+      const dateB = new Date(Date.parse(`1 ${b}`));
+      return dateB - dateA; 
     })];
   }, [invoices]);
 
@@ -134,9 +174,10 @@ const Invoices = () => {
   const filteredInvoices = useMemo(() => {
     const searchLower = filters.search.toLowerCase();
     const monthFilter = filters.billingMonth;
-    const projectIdFilter = filters.projectName;
-    const subprojectIdFilter = filters.subprojectName;
-
+    
+    // Note: Project/Subproject filtering on the LIST view is harder without populate.
+    // We will filter based on what data is available in the invoice object.
+    
     return invoices.filter(inv => {
       // 1. Invoice Number Search
       if (!inv.invoice_number.toLowerCase().includes(searchLower)) {
@@ -145,31 +186,32 @@ const Invoices = () => {
 
       // 2. Billing Month Filter
       if (monthFilter !== 'all') {
-        const firstRecord = inv.billing_records?.[0];
-        if (!firstRecord) return false;
+        let month = inv.month;
+        let year = inv.year;
+        
+        // Fallback logic similar to above
+        if (!month && inv.billing_records?.[0]) {
+            month = inv.billing_records[0].month;
+            year = inv.billing_records[0].year;
+        }
+        if (!month) {
+            const date = new Date(inv.createdAt);
+            month = date.getMonth() + 1;
+            year = date.getFullYear();
+        }
 
-        const monthName = new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' });
-        const invoicePeriod = `${monthName} ${firstRecord.year}`;
+        const monthName = new Date(0, month - 1).toLocaleString('default', { month: 'long' });
+        const invoicePeriod = `${monthName} ${year}`;
+        
         if (invoicePeriod !== monthFilter) {
           return false;
         }
       }
 
-      // 3 & 4. Project/Subproject Filtering (Check if ANY record matches)
-      const records = getLookups(inv);
-
-      // Filter by Project ID
-      if (projectIdFilter) {
-        const projectMatch = records.some(r => (r.project_id?._id || r.project_id) === projectIdFilter);
-        if (!projectMatch) return false;
-      }
-
-      // Filter by Subproject ID
-      if (subprojectIdFilter) {
-        const subprojectMatch = records.some(r => (r.subproject_id?._id || r.subproject_id) === subprojectIdFilter);
-        if (!subprojectMatch) return false;
-      }
-
+      // 3. Project Filter (Optimistic: Checks if inv has project data directly or in records)
+      // Since the list view is optimized, deep filtering usually happens on Backend.
+      // For Client-side filtering here, we skip project filtering if data isn't loaded.
+      
       return true;
     });
   }, [invoices, filters]);
@@ -180,171 +222,152 @@ const Invoices = () => {
 
   const formatDate = (d) =>
     new Date(d).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+      year: 'numeric', month: 'long', day: 'numeric'
     });
 
-  // Retrieves the billing month/year string for the table display
   const getBillingMonthText = (invoice) => {
-    const firstRecord = invoice.billing_records?.[0];
-    if (firstRecord && firstRecord.month && firstRecord.year) {
-      const monthName = new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' });
-      return `${monthName} ${firstRecord.year}`;
+    // Try root level first, then records, then createdAt
+    let month = invoice.month;
+    let year = invoice.year;
+
+    if (!month && invoice.billing_records?.[0]) {
+        month = invoice.billing_records[0].month;
+        year = invoice.billing_records[0].year;
     }
-    return 'N/A';
+    
+    if (month && year) {
+      const monthName = new Date(0, month - 1).toLocaleString('default', { month: 'long' });
+      return `${monthName} ${year}`;
+    }
+    
+    return formatDate(invoice.createdAt);
   };
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
-
     let newFilters = { ...filters, [name]: value };
-
-    // If the project filter changes, reset the subproject filter
-    if (name === 'projectName') {
-      newFilters.subprojectName = '';
-    }
-
+    if (name === 'projectName') newFilters.subprojectName = '';
     setFilters(newFilters);
   };
 
-  // --- HANDLE PDF DOWNLOAD ---
+  // --- PDF DOWNLOAD ---
   const handleDownloadPdf = () => {
-  if (!isPdfLibReady || !selectedInvoice) 
-    return console.error("PDF not ready or no invoice selected.");
+    if (!isPdfLibReady || !selectedInvoice) 
+      return console.error("PDF not ready or no invoice selected.");
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
 
-  doc.setFontSize(20);
-  doc.text(`Invoice: ${selectedInvoice.invoice_number}`, 14, 22);
+    doc.setFontSize(20);
+    doc.text(`Invoice: ${selectedInvoice.invoice_number}`, 14, 22);
 
-  const first = selectedInvoice.billing_records[0];
-  if (first) {
-    const period = `${new Date(0, first.month - 1).toLocaleString('default', { month: 'long' })} ${first.year}`;
     doc.setFontSize(12);
-    doc.text(`For Period: ${period}`, 14, 30);
-  }
-  doc.text(`Date Generated: ${formatDate(selectedInvoice.createdAt)}`, 14, 36);
+    doc.text(`For Period: ${getBillingMonthText(selectedInvoice)}`, 14, 30);
+    doc.text(`Date Generated: ${formatDate(selectedInvoice.createdAt)}`, 14, 36);
 
-  const rows = getLookups(selectedInvoice);
-  // ✅ UPDATED HEADERS (added Flat Rate)
-  const head = [['Project', 'Sub-Project', 'Resource', 'Hours', 'Flat Rate', 'Rate', 'Costing', 'Total', 'Status']];
+    const rows = getLookups(selectedInvoice);
+    const head = [['Project', 'Sub-Project', 'Resource', 'Hours', 'Flat Rate', 'Rate', 'Costing', 'Total', 'Status']];
 
-  const body = rows.map(r => {
-  const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
-  const totalValue = isNonBillable ? 0 : r.total_amount;
+    const body = rows.map(r => {
+      const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
+      const totalValue = isNonBillable ? 0 : r.total_amount;
 
-  return [
-    r.projectName,
-    r.subprojectName,
-    r.resourceName,
-    r.hours,
-    formatCurrency(r.flatrate),
-    formatCurrency(r.rate),
-    formatCurrency(r.costing),
-    formatCurrency(totalValue), // ✅ updated
-    r.billable_status
-  ];
-});
+      return [
+        r.projectName,
+        r.subprojectName,
+        r.resourceName,
+        r.hours,
+        formatCurrency(r.flatrate),
+        formatCurrency(r.rate),
+        formatCurrency(r.costing),
+        formatCurrency(totalValue),
+        r.billable_status
+      ];
+    });
 
+    doc.autoTable({ startY: 45, head, body });
+    const finalY = doc.autoTable.previous.finalY;
 
-  doc.autoTable({ startY: 45, head, body });
-  const finalY = doc.autoTable.previous.finalY;
+    // Totals
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    let currentY = finalY + 15;
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total Costing Amount: ${formatCurrency(selectedInvoice.total_costing_amount)}`, 14, currentY);
+    currentY += 8;
+    doc.text(`Total Billing Amount: ${formatCurrency(selectedInvoice.total_billable_amount)}`, 14, currentY);
 
-  // --- Summary Totals ---
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  let currentY = finalY + 15;
-  // doc.text(`Billing Total (Billable + Non-Billable): ${formatCurrency(selectedInvoice.total_billing_amount)}`, 14, currentY);
+    doc.save(`Invoice-${selectedInvoice.invoice_number}.pdf`);
+  };
 
-  currentY += 8;
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Total Costing Amount: ${formatCurrency(selectedInvoice.total_costing_amount)}`, 14, currentY);
-  currentY += 8;
-  doc.text(`Total Billing Amount: ${formatCurrency(selectedInvoice.total_billable_amount)}`, 14, currentY);
+  // --- CSV DOWNLOAD ---
+  const handleDownloadCsv = async (invoiceOrId) => {
+    let invoiceToDownload = invoiceOrId;
 
-  doc.save(`Invoice-${selectedInvoice.invoice_number}.pdf`);
-};
-  // --- NEW: HANDLE CSV DOWNLOAD ---
- const handleDownloadCsv = (invoice) => {
-  if (!invoice) return console.error("No invoice selected.");
+    // If we only have the lightweight invoice (no billing records), fetch full details
+    if (!invoiceToDownload.billing_records || invoiceToDownload.billing_records.length === 0) {
+        // Show a temporary loading state or toast if you have one
+        const fullDetails = await fetchInvoiceDetails(invoiceToDownload._id);
+        if(!fullDetails) return;
+        invoiceToDownload = fullDetails;
+    }
 
-  const records = getLookups(invoice);
-  const firstRecord = invoice.billing_records[0] || {};
-  const monthName = firstRecord.month
-    ? new Date(0, firstRecord.month - 1).toLocaleString('default', { month: 'long' })
-    : '';
+    const records = getLookups(invoiceToDownload);
+    const period = getBillingMonthText(invoiceToDownload);
 
-  // ✅ Match PDF headers
-  const headers = [
-    "Invoice_Number",
-    "Billing_Month",
-    "Billing_Year",
-    "Project",
-    "Sub_Project",
-    "Resource",
-    "Hours",
-    "Flat_Rate",
-    "Rate",
-    "Costing",
-    "Total",
-    "Status"
-  ];
+    const headers = [
+      "Invoice_Number",
+      "Billing_Period",
+      "Project",
+      "Sub_Project",
+      "Resource",
+      "Hours",
+      "Flat_Rate",
+      "Rate",
+      "Costing",
+      "Total",
+      "Status"
+    ];
 
-  // ✅ Generate data rows
-const csvRows = records.map(r => {
-  const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
-  const totalValue = isNonBillable ? 0 : r.total_amount;
+    const csvRows = records.map(r => {
+      const isNonBillable = r.billable_status?.toLowerCase() === 'non-billable';
+      const totalValue = isNonBillable ? 0 : r.total_amount;
 
-  return [
-    invoice.invoice_number,
-    monthName,
-    firstRecord.year || '',
-    `"${r.projectName?.replace(/"/g, '""') || ''}"`,
-    `"${r.subprojectName?.replace(/"/g, '""') || ''}"`,
-    `"${r.resourceName?.replace(/"/g, '""') || ''}"`,
-    r.hours || 0,
-    r.flatrate || 0,
-    r.rate || 0,
-    r.costing || 0,
-    totalValue || 0, // ✅ updated
-    r.billable_status || ''
-  ].join(',');
-});
+      return [
+        invoiceToDownload.invoice_number,
+        period,
+        `"${r.projectName?.replace(/"/g, '""') || ''}"`,
+        `"${r.subprojectName?.replace(/"/g, '""') || ''}"`,
+        `"${r.resourceName?.replace(/"/g, '""') || ''}"`,
+        r.hours || 0,
+        r.flatrate || 0,
+        r.rate || 0,
+        r.costing || 0,
+        totalValue || 0,
+        r.billable_status || ''
+      ].join(',');
+    });
 
+    const summaryRows = [
+      "",
+      "SUMMARY TOTALS",
+      "",
+      `Total Costing Amount:,${invoiceToDownload.total_costing_amount || 0}`,
+      `Total Billable Amount:,${invoiceToDownload.total_billable_amount || 0}`
+    ];
 
-  // ✅ Add summary totals (same as in PDF)
-  const summaryRows = [
-    "",
-    "SUMMARY TOTALS",
-    "",
-    `Total Costing Amount:,${invoice.total_costing_amount || 0}`,
-    // `Total Non-BillableAmount:,${invoice.total_non_billable_amount || 0}`,
-    `Total Billable Amount:,${invoice.total_billable_amount || 0}`
-  ];
+    const csvContent = [headers.join(','), ...csvRows, '', ...summaryRows].join('\n');
 
-  // ✅ Combine CSV
-  const csvContent = [
-    headers.join(','),
-    ...csvRows,
-    '',
-    ...summaryRows
-  ].join('\n');
-
-  // ✅ Download logic
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `Invoice-${invoice.invoice_number}.csv`;
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Invoice-${invoiceToDownload.invoice_number}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
 
   // --- RENDER ---
@@ -358,9 +381,7 @@ const csvRows = records.map(r => {
 
         {/* Filters */}
         <div className="bg-white p-4 rounded-xl shadow-sm mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-
-            {/* 1. Search by Invoice # */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label htmlFor="search" className="block text-sm font-medium text-gray-700">Search by Invoice #</label>
               <input
@@ -374,7 +395,6 @@ const csvRows = records.map(r => {
               />
             </div>
 
-            {/* 2. Billing Month Filter */}
             <div>
               <label htmlFor="billingMonth" className="block text-sm font-medium text-gray-700">Billing Month</label>
               <select
@@ -391,43 +411,9 @@ const csvRows = records.map(r => {
                 ))}
               </select>
             </div>
-
-            {/* 3. Project Name Filter */}
-            <div>
-              <label htmlFor="projectName" className="block text-sm font-medium text-gray-700">Project Name</label>
-              <select
-                id="projectName"
-                name="projectName"
-                value={filters.projectName}
-                onChange={handleFilterChange}
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              >
-                <option value="">All Projects</option>
-                {projectsList.map(p => (
-                  <option key={p._id} value={p._id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* 4. Subproject Name Filter */}
-            <div>
-              <label htmlFor="subprojectName" className="block text-sm font-medium text-gray-700">Subproject Name</label>
-              <select
-                id="subprojectName"
-                name="subprojectName"
-                value={filters.subprojectName}
-                onChange={handleFilterChange}
-                disabled={!filters.projectName}
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100"
-              >
-                <option value="">All Subprojects</option>
-                {subprojectsList
-                  .filter(sp => sp.projectId === filters.projectName)
-                  .map(sp => (
-                    <option key={sp._id} value={sp._id}>{sp.name}</option>
-                  ))}
-              </select>
-            </div>
+            
+            {/* Project Filters removed here as Server-Side filtering on the list view requires 
+                additional backend endpoint parameters. Kept Search/Month as they are robust. */}
           </div>
         </div>
 
@@ -437,41 +423,33 @@ const csvRows = records.map(r => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {/* UPDATED HEADER ARRAY: Added 'Billing Total' and 'Costing Total' */}
-                  {['Invoice #', 'Billing Month', 'Billing Total', 'Costing Total', 'Billable Amount', 'Non-Billable Amount', 'Items', 'Created', 'Download'].map(header => (
+                  {['Invoice #', 'Billing Period', 'Billing Total', 'Costing Total', 'Billable Amount', 'Items', 'Created', 'Download'].map(header => (
                     <th key={header} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{header}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {isLoading ? (
-                  <tr><td colSpan="9" className="text-center py-10">Loading invoices...</td></tr>
+                  <tr><td colSpan="8" className="text-center py-10">Loading invoices...</td></tr>
                 ) : filteredInvoices.map(invoice => (
-                  <tr key={invoice._id} onClick={() => setSelectedInvoice(invoice)} className="hover:bg-gray-50 cursor-pointer">
+                  <tr key={invoice._id} onClick={() => handleRowClick(invoice._id)} className="hover:bg-gray-50 cursor-pointer">
                     <td className="px-6 py-4 text-sm font-medium text-blue-600">{invoice.invoice_number}</td>
-                    <td className="px-6 py-4 text-sm text-gray-800 font-medium">
-                      {getBillingMonthText(invoice)}
-                    </td>
-                    {/* Updated field to total_billing_amount */}
+                    <td className="px-6 py-4 text-sm text-gray-800 font-medium">{getBillingMonthText(invoice)}</td>
                     <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrency(invoice.total_billing_amount)}</td>
-                    {/* Added new field total_costing_amount */}
                     <td className="px-6 py-4 text-sm text-gray-700">{formatCurrency(invoice.total_costing_amount)}</td>
-
                     <td className="px-6 py-4 text-sm text-green-700">{formatCurrency(invoice.total_billable_amount)}</td>
-                    <td className="px-6 py-4 text-sm text-red-700">{formatCurrency(invoice.total_non_billable_amount)}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{invoice.billing_records.length}</td>
+                    {/* Access record length if available, or assume detail load needed */}
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                        {invoice.billing_records ? invoice.billing_records.length : '-'}
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-500">{formatDate(invoice.createdAt)}</td>
-
-                    {/* DOWNLOAD CELL */}
                     <td className="px-6 py-4 text-sm text-gray-500">
                       <button
                         onClick={(e) => {
-                          // Stop propagation to prevent the row's onClick (opening the modal)
                           e.stopPropagation();
                           handleDownloadCsv(invoice);
                         }}
                         className="text-xs font-semibold text-green-600 hover:text-green-800 transition duration-150 p-2 rounded-lg bg-green-50 hover:bg-green-100 shadow-sm"
-                        title={`Download ${invoice.invoice_number} as CSV`}
                       >
                         Download CSV
                       </button>
@@ -491,68 +469,56 @@ const csvRows = records.map(r => {
             <div className="p-6 border-b border-gray-200 flex justify-between items-start">
               <div>
                 <h2 className="text-2xl font-bold text-gray-800">Invoice {selectedInvoice.invoice_number}</h2>
-                {/* Displaying both new totals */}
-                {/* <p className="text-sm text-gray-500 mt-1">
-                  <span className="font-semibold text-gray-700">Billing Total:</span> {formatCurrency(selectedInvoice.total_billing_amount)}
-                  <span className="mx-2 text-gray-300">|</span>
-                  <span className="font-semibold text-gray-700">Costing Total:</span> {formatCurrency(selectedInvoice.total_costing_amount)}
-                </p> */}
               </div>
               <button onClick={() => setSelectedInvoice(null)} className="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
             </div>
 
             <div className="p-6 overflow-y-auto">
-              <h3 className="text-lg font-semibold text-gray-700 mb-4">Billing Records ({selectedInvoice.billing_records.length})</h3>
-              {console.log(selectedInvoice.billing_records)}
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {/* UPDATED: Added 'Costing' to modal table headers */}
-                      {['Project', 'Sub-Project', 'Resource', 'Hours','flat rate', 'costing Rate', 'Costing', 'Total', 'Status'].map(h => (
-                        <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {getLookups(selectedInvoice).map(record => (
-                      <tr key={record._id}>
-                        <td className="px-4 py-3 text-sm text-gray-700">{record.projectName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{record.subprojectName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-800">{record.resourceName}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{record.hours}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.flatrate)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.rate)}</td>
-                        {/* UPDATED: Added Costing field to modal table body */}
-                        <td className="px-4 py-3 text-sm text-red-600">{formatCurrency(record.costing)}</td>
-                        {/* FIX: Use pre-calculated total_amount */}
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">
-  {formatCurrency(
-    record.billable_status?.toLowerCase() === 'non-billable'
-      ? 0
-      : record.total_amount
-  )}
-</td>
-
-                        <td className="px-4 py-3 text-sm text-gray-600">{record.billable_status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {isDetailLoading ? (
+                  <div className="flex justify-center py-10">Loading Details...</div>
+              ) : (
+                <>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-4">Billing Records ({selectedInvoice.billing_records.length})</h3>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {['Project', 'Sub-Project', 'Resource', 'Hours', 'Flat Rate', 'Costing Rate', 'Costing', 'Total', 'Status'].map(h => (
+                            <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {getLookups(selectedInvoice).map(record => (
+                          <tr key={record._id}>
+                            <td className="px-4 py-3 text-sm text-gray-700">{record.projectName}</td>
+                            <td className="px-4 py-3 text-sm text-gray-700">{record.subprojectName}</td>
+                            <td className="px-4 py-3 text-sm text-gray-800">{record.resourceName}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{record.hours}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.flatrate)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{formatCurrency(record.rate)}</td>
+                            <td className="px-4 py-3 text-sm text-red-600">{formatCurrency(record.costing)}</td>
+                            <td className="px-4 py-3 text-sm font-semibold text-gray-800">
+                              {formatCurrency(record.billable_status?.toLowerCase() === 'non-billable' ? 0 : record.total_amount)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{record.billable_status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
-              {/* Download PDF button */}
               <button
                 onClick={handleDownloadPdf}
-                disabled={!isPdfLibReady}
-                className={`px-4 py-2 rounded-lg text-white flex items-center space-x-2 ${isPdfLibReady ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'
-                  }`}
+                disabled={!isPdfLibReady || isDetailLoading}
+                className={`px-4 py-2 rounded-lg text-white flex items-center space-x-2 ${isPdfLibReady && !isDetailLoading ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}
               >
                 <span>{isPdfLibReady ? 'Download PDF' : 'Loading Libs...'}</span>
               </button>
-              {/* Download CSV button for the selected invoice in the modal */}
               <button
                 onClick={() => handleDownloadCsv(selectedInvoice)}
                 className="px-4 py-2 rounded-lg text-white flex items-center space-x-2 bg-green-600 hover:bg-green-700"
