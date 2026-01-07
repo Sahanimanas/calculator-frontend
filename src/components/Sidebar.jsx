@@ -13,7 +13,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CiSettings } from "react-icons/ci";
 
 const navItems = [
-  { name: "Home", icon: CalculatorIcon, path: "/" },
+  // { name: "Analysis", icon: CalculatorIcon, path: "/" },
+  { name: "Dashboard", icon: ChartBarIcon, path: "/" },
   { name: "Projects", icon: FolderIcon, path: "/projects" },
   { name: "Resources", icon: UsersIcon, path: "/resources" },
   { name: "Productivity", icon: FaChartBar, path: "/productivity" },

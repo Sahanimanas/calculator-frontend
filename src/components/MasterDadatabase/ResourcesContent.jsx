@@ -16,7 +16,7 @@ const ResourcesContent = () => {
         const res = await fetch(API_URL);
         if (!res.ok) throw new Error("Failed to fetch resources");
         const data = await res.json();
-        setResources(data);
+        setResources(data.resources);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -77,8 +77,8 @@ const ResourcesContent = () => {
               <th className="px-6 py-3">Resource</th>
               <th className="px-6 py-3">Role</th>
               <th className="px-6 py-3">Email</th>
-              <th className="px-6 py-3">Assigned Projects</th>
-              <th className="px-6 py-3">Assigned Subprojects</th>
+              <th className="px-6 py-3">Assigned Projects/Process</th>
+              {/* <th className="px-6 py-3">Assigned Subprojects</th> */}
               <th className="px-6 py-3">Created</th>
               <th className="px-6 py-3">Updated</th>
             </tr>
@@ -134,7 +134,7 @@ const ResourcesContent = () => {
                 </td>
 
                 {/* Assigned Subprojects */}
-                <td className="px-6 py-4">
+                {/* <td className="px-6 py-4">
                   <div className="flex flex-wrap gap-2">
                     {res.assigned_subprojects.length > 0 ? (
                       res.assigned_subprojects.map((sp) => (
@@ -149,7 +149,7 @@ const ResourcesContent = () => {
                       <span className="text-gray-400 text-xs">—</span>
                     )}
                   </div>
-                </td>
+                </td> */}
 
                 {/* Dates */}
                 <td className="px-6 py-4 text-gray-500">

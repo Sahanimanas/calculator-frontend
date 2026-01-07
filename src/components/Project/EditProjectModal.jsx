@@ -1,104 +1,247 @@
+// components/Project/EditProjectModal.jsx - UPDATED
+import React, { useEffect, useState } from "react";
+import { toast } from "react-hot-toast";
+import axios from "axios";
 
-import React, { useEffect, useState } from 'react';
-import { toast } from 'react-hot-toast';
-import { updateProject } from '../../services/projectService';
+const EditProjectModal = ({ isOpen, onClose, project, client, refreshProjects }) => {
+  const apiUrl = import.meta.env.VITE_BACKEND_URL;
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState("visible");
+  const [status, setStatus] = useState("active");
+  const [geographyId, setGeographyId] = useState("");
+  const [clientId, setClientId] = useState("");
+  
+  const [geographies, setGeographies] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchingGeographies, setFetchingGeographies] = useState(false);
+  const [fetchingClients, setFetchingClients] = useState(false);
 
-const EditProjectModal = ({ isOpen, onClose, project, refreshProjects }) => {
-  const [name, setName] = useState('');
-  const [visibility, setVisibility] = useState('visible');
-  const [desc, setDesc] = useState('');
-  const [projectPrice, setProjectPrice] = useState();
-  // console.log("This is the project: ", project);
+  const fetchGeographies = async () => {
+    setFetchingGeographies(true);
+    try {
+      const response = await axios.get(`${apiUrl}/geography`, {
+        params: { page: 1, limit: 1000 },
+      });
+      setGeographies(response.data.geographies || []);
+    } catch (error) {
+      console.error("Error fetching geographies:", error);
+      toast.error("Failed to fetch geographies");
+    } finally {
+      setFetchingGeographies(false);
+    }
+  };
+
+  const fetchClients = async (geoId) => {
+    if (!geoId) {
+      setClients([]);
+      return;
+    }
+
+    setFetchingClients(true);
+    try {
+      const response = await axios.get(`${apiUrl}/client/geography/${geoId}`, {
+        params: { page: 1, limit: 1000 },
+      });
+      setClients(response.data.clients || []);
+    } catch (error) {
+      console.error("Error fetching clients:", error);
+      toast.error("Failed to fetch clients");
+      setClients([]);
+    } finally {
+      setFetchingClients(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchGeographies();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (project) {
-      setName(project.name || '');
-      setVisibility(project.visibility || 'visible');
-      setDesc(project.description || '');
-      setProjectPrice(project.flatrate || 0);
+      setName(project.name || "");
+      setDescription(project.description || "");
+      setVisibility(project.visibility || "visible");
+      setStatus(project.status || "active");
+      setGeographyId(project.geography_id || client?.geography_id || "");
+      setClientId(project.client_id || client?._id || "");
     }
-  }, [project]);
+  }, [project, client]);
+
+  useEffect(() => {
+    if (geographyId) {
+      fetchClients(geographyId);
+    }
+  }, [geographyId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const body = {
-      name,
-      visibility,
-      description: desc,
-      projectPrice
-    }
+    if (!name.trim()) return toast.error("Project name is required");
+    if (!geographyId) return toast.error("Please select a geography");
+    if (!clientId) return toast.error("Please select a client");
 
-    console.log("This is the body: ", body);
+    setLoading(true);
     try {
-      const { status } = await updateProject(project._id, body);
+      const response = await axios.put(`${apiUrl}/project/${project._id}`, {
+        name: name.trim(),
+        description: description.trim(),
+        visibility,
+        status,
+        geography_id: geographyId,
+        client_id: clientId,
+      });
 
-      if (status === 200) {
+      if (response.status === 200) {
         toast.success("Project updated successfully");
-        refreshProjects?.(); // refresh project list
+        refreshProjects();
         onClose();
-      } else {
-        toast.error("Failed to update project");
       }
-    } catch (err) {
-      console.error("Update error:", err);
-      toast.error("An error occurred");
+    } catch (error) {
+      console.error("Error updating project:", error);
+      if (error.response?.status === 409) {
+        toast.error("Project name already exists for this client");
+      } else {
+        toast.error(error.response?.data?.error || "Failed to update project");
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   if (!isOpen || !project) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 relative">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Edit Project</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+          <h2 className="text-xl font-semibold">
+            Edit <span className="text-green-700">Project</span>
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl"
+            disabled={loading}
+          >
+            &times;
+          </button>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
+          {/* Geography and Client Selection */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Geography <span className="text-red-500">*</span>
+              </label>
               <select
-                value={visibility}
-                onChange={(e) => setVisibility(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={geographyId}
+                onChange={(e) => setGeographyId(e.target.value)}
+                disabled={loading || fetchingGeographies}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
+                required
               >
-                <option value="visible">Visible</option>
-                <option value="hidden">Hidden</option>
+                <option value="">
+                  {fetchingGeographies ? "Loading..." : "Select geography"}
+                </option>
+                {geographies.map((geo) => (
+                  <option key={geo._id} value={geo._id}>
+                    {geo.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Client <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                disabled={loading || fetchingClients || !geographyId}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
+                required
+              >
+                <option value="">
+                  {!geographyId
+                    ? "Select geography first"
+                    : fetchingClients
+                    ? "Loading clients..."
+                    : "Select client"}
+                </option>
+                {clients.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
-          {/* <div className="flex-1"> */}
-          {/*   <label className="block text-sm font-medium text-gray-700 mb-1">Project Price</label> */}
-          {/*   <input */}
-          {/*     type="Number" */}
-          {/*     value={projectPrice} */}
-          {/*     onChange={(e) => setProjectPrice(e.target.value)} */}
-          {/*     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" */}
-          {/*     required */}
-          {/*   /> */}
-          {/* </div> */}
+          {/* Project Name and Status */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Project Name (Process Type) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Data Processing"
+                disabled={loading}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
+                required
+              />
+            </div>
 
+            {/* <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                disabled={loading}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div> */}
+          </div>
+
+          {/* Visibility */}
+          {/* <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Visibility
+            </label>
+            <select
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value)}
+              disabled={loading}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
+            >
+              <option value="visible">Visible</option>
+              <option value="hidden">Hidden</option>
+            </select>
+          </div> */}
+
+          {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
             <textarea
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              rows="4"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="(Optional)"
+              rows="3"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="(Optional) Brief description"
+              disabled={loading}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-green-500 disabled:opacity-70"
             />
           </div>
 
@@ -106,18 +249,28 @@ const EditProjectModal = ({ isOpen, onClose, project, refreshProjects }) => {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+              disabled={loading}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 disabled:opacity-70"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              disabled={loading}
+              className={`px-4 py-2 rounded-md text-white transition-all ${
+                loading ? "bg-green-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
+              }`}
             >
-              Update Project
+              {loading ? "Updating..." : "Update Project"}
             </button>
           </div>
         </form>
+
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-lg">
+            <div className="animate-spin rounded-full h-8 w-8 border-4 border-green-500 border-t-transparent"></div>
+          </div>
+        )}
       </div>
     </div>
   );

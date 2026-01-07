@@ -43,8 +43,7 @@ const AddTierModal = ({ isOpen, onClose, projects, onAddTiers, editProjectId, ed
   // Fetch subprojects when a project is selected
   useEffect(() => {
     if (!selectedProject) return;
-    axios
-      .get(`${apiBaseUrl}/project/sub-project?project_id=${selectedProject}`)
+    axios.get(`${apiBaseUrl}/project/${selectedProject}/subproject`)
       .then((res) => setSubProjects(res.data))
       .catch((err) => console.error('Failed to fetch subprojects:', err));
   }, [selectedProject]);
@@ -203,8 +202,7 @@ export default function Productivity() {
 
   useEffect(() => {
     if (!selectedProject) return;
-    axios
-      .get(`${apiBaseUrl}/project/sub-project?project_id=${selectedProject}`)
+    axios.get(`${apiBaseUrl}/project/${selectedProject}/subproject`)
       .then((res) => setSubProjects(res.data))
       .catch((err) => console.error('Failed to fetch subprojects:', err));
   }, [selectedProject]);
