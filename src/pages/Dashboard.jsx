@@ -1,4 +1,4 @@
-// pages/BillingDashboard.jsx - WITH GEOGRAPHY FILTER
+// pages/BillingDashboard.jsx - WITH CLIENT AND GEOGRAPHY FILTER + FIXED EXPORT
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'react-hot-toast';
@@ -6,7 +6,7 @@ import { toast } from 'react-hot-toast';
 const apiBaseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000/api';
 
 // =============================================
-// HELPER COMPONENTS (Same as before)
+// HELPER COMPONENTS
 // =============================================
 
 const PageHeader = ({ heading, subHeading }) => (
@@ -23,7 +23,7 @@ const Loader = ({ message = "Loading..." }) => (
   </div>
 );
 
-// Async Searchable Select Component
+// Async Searchable Select Component with improved text overflow handling
 const AsyncSelect = ({ 
   value, 
   onChange, 
@@ -107,14 +107,15 @@ const AsyncSelect = ({
     <div ref={containerRef} className="relative">
       <div
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full px-3 py-2 border rounded-lg flex items-center justify-between cursor-pointer ${
+        className={`w-full px-3 py-2 border rounded-lg flex items-center justify-between cursor-pointer min-h-[42px] ${
           disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white hover:border-blue-400'
         }`}
+        title={selectedLabel} // Tooltip for full text
       >
-        <span className={selectedLabel ? 'text-gray-900' : 'text-gray-400'}>
+        <span className={`flex-1 truncate ${selectedLabel ? 'text-gray-900' : 'text-gray-400'}`}>
           {selectedLabel || placeholder}
         </span>
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-1 flex-shrink-0 ml-2">
           {value && !disabled && (
             <button
               onClick={handleClear}
@@ -129,7 +130,7 @@ const AsyncSelect = ({
 
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-hidden">
-          <div className="p-2 border-b">
+          <div className="p-2 border-b sticky top-0 bg-white">
             <input
               type="text"
               value={search}
@@ -144,7 +145,7 @@ const AsyncSelect = ({
               <div className="p-3 text-center text-gray-500">Loading...</div>
             ) : options.length === 0 ? (
               <div className="p-3 text-center text-gray-500">
-                {search ? 'No results found' : 'Type to search'}
+                {search ? 'No results found' : 'Start typing to search'}
               </div>
             ) : (
               options.map((option) => (
@@ -154,8 +155,9 @@ const AsyncSelect = ({
                   className={`px-3 py-2 cursor-pointer hover:bg-blue-50 ${
                     option[valueKey] === value ? 'bg-blue-100 text-blue-700' : ''
                   }`}
+                  title={option[labelKey]} // Tooltip for full text
                 >
-                  {option[labelKey]}
+                  <div className="truncate">{option[labelKey]}</div>
                 </div>
               ))
             )}
@@ -166,14 +168,14 @@ const AsyncSelect = ({
   );
 };
 
-// CSV Format Modal (same as before)
+// CSV Format Modal
 const CSVFormatModal = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
-  const sampleCSV = `Allocation Date,Name,Request Type,Location,Process Type,Geography
-11/1/2025,John Smith,New Request,Bronx-Care,Verisma Complete Logging,US
-11/1/2025,Jane Doe,Duplicate,Mumbai Office,Data Processing,IND
-11/2/2025,Bob Johnson,Key,New York Office,Medical Coding,US`;
+  const sampleCSV = `Allocation Date,Name,Request Type,Location,Process Type,Client,Geography
+11/1/2025,John Smith,New Request,Bronx-Care,Verisma Complete Logging,ABC Corp,US
+11/1/2025,Jane Doe,Duplicate,Mumbai Office,Data Processing,XYZ Ltd,IND
+11/2/2025,Bob Johnson,Key,New York Office,Medical Coding,ABC Corp,US`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -208,6 +210,9 @@ const CSVFormatModal = ({ isOpen, onClose }) => {
                 <div className="font-medium text-gray-700">Process Type:</div>
                 <div className="text-gray-600">Project/Process name</div>
                 
+                <div className="font-medium text-gray-700">Client:</div>
+                <div className="text-gray-600">Client name from database</div>
+                
                 <div className="font-medium text-gray-700">Geography:</div>
                 <div className="text-gray-600">Exact name from your database</div>
               </div>
@@ -224,7 +229,7 @@ const CSVFormatModal = ({ isOpen, onClose }) => {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h4 className="font-semibold text-blue-900 mb-2">📝 Important Notes:</h4>
             <ul className="list-disc list-inside space-y-1 text-sm text-blue-800">
-              <li>Geography must match EXACT name in your database</li>
+              <li>Geography, Client, Process Type, and Location must match EXACT names in your database</li>
               <li>Request Type must be: "New Request", "Key", or "Duplicate"</li>
               <li>Each row represents one allocation occurrence</li>
               <li>System will count occurrences and calculate billing based on rates</li>
@@ -246,7 +251,7 @@ const CSVFormatModal = ({ isOpen, onClose }) => {
   );
 };
 
-// Upload Modal (same as before - keeping it short for space)
+// Upload Modal
 const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -445,10 +450,12 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
 
 const BillingDashboard = () => {
   // ALL State declarations
-  const [geographiesData, setGeographiesData] = useState([]); // NEW
+  const [geographiesData, setGeographiesData] = useState([]);
+  const [clientsData, setClientsData] = useState([]); // For initial load
   const [projectsData, setProjectsData] = useState([]);
   const [filters, setFilters] = useState({
-    geography: '', // NEW
+    geography: '',
+    client: '', // Now independent
     project: '',
     subProject: '',
     month: 'all',
@@ -493,27 +500,59 @@ const BillingDashboard = () => {
     });
   };
 
-  // Fetch geographies and projects on mount
+  // Fetch geographies on mount
   useEffect(() => {
-    const fetchInitialData = async () => {
+    const fetchGeographies = async () => {
       try {
-        const [geoResponse, projResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/geography`),
-          fetch(`${apiBaseUrl}/project`)
-        ]);
-        
-        const geographies = await geoResponse.json();
-        const projects = await projResponse.json();
-        
-        setGeographiesData(Array.isArray(geographies) ? geographies.geographies : geographies.geographies || []);
-        setProjectsData(Array.isArray(projects) ? projects : projects.data || []);
-        // console.log(geographies.geographies)
+        const response = await fetch(`${apiBaseUrl}/geography`);
+        const data = await response.json();
+        setGeographiesData(Array.isArray(data) ? data : data.geographies || []);
       } catch (error) {
-        console.error("Error fetching initial data:", error);
+        console.error("Error fetching geographies:", error);
       }
     };
-    fetchInitialData();
+    fetchGeographies();
   }, []);
+
+  // Fetch clients when geography changes
+  useEffect(() => {
+    const fetchClients = async () => {
+      if (!filters.geography) {
+        setClientsData([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/geography/${filters.geography}/client`);
+        const data = await response.json();
+        setClientsData(Array.isArray(data) ? data : data.clients || []);
+      } catch (error) {
+        console.error("Error fetching clients:", error);
+        setClientsData([]);
+      }
+    };
+    fetchClients();
+  }, [filters.geography]);
+
+  // Fetch projects when client changes
+  useEffect(() => {
+    const fetchProjects = async () => {
+      if (!filters.client) {
+        setProjectsData([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/client/${filters.client}/project`);
+        const data = await response.json();
+        setProjectsData(Array.isArray(data) ? data : data.projects || []);
+      } catch (error) {
+        console.error("Error fetching projects:", error);
+        setProjectsData([]);
+      }
+    };
+    fetchProjects();
+  }, [filters.client]);
 
   // Fetch latest upload info
   const fetchLatestUpload = useCallback(async () => {
@@ -535,7 +574,7 @@ const BillingDashboard = () => {
     }
   }, [useAllocationData, fetchLatestUpload]);
 
-  // Fetch subprojects function
+  // Fetch subprojects function (async for AsyncSelect)
   const fetchSubprojects = useCallback(async (search = '') => {
     if (!filters.project) return [];
     
@@ -563,8 +602,87 @@ const BillingDashboard = () => {
     }
   }, [filters.project]);
 
-  // Clear subproject when project changes
+  // Fetch clients function (async for AsyncSelect) - NOW INDEPENDENT
+  const fetchClientsAsync = useCallback(async (search = '') => {
+    try {
+      const params = new URLSearchParams();
+      if (search) {
+        params.append('search', search);
+      }
+      // Optionally filter by geography if selected
+      if (filters.geography) {
+        params.append('geography_id', filters.geography);
+      }
+
+      const response = await fetch(
+        `${apiBaseUrl}/client?${params}`
+      );
+      
+      if (!response.ok) throw new Error('Failed to fetch clients');
+      
+      const data = await response.json();
+      return Array.isArray(data) ? data : data.clients || [];
+    } catch (error) {
+      console.error("Error fetching clients:", error);
+      return [];
+    }
+  }, [filters.geography]); // Depends on geography but doesn't require it
+
+  // Fetch projects function (async for AsyncSelect) - ONLY for selected client
+  const fetchProjectsAsync = useCallback(async (search = '') => {
+    // Don't fetch if no client is selected
+    if (!filters.client) {
+      console.log('No client selected, not fetching projects');
+      return [];
+    }
+    
+    try {
+      const params = new URLSearchParams();
+      if (search) {
+        params.append('search', search);
+      }
+
+      console.log(`Fetching projects for client: ${filters.client}`);
+      const response = await fetch(
+        `${apiBaseUrl}/client/${filters.client}/project?${params}`
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to fetch projects:', response.status, errorText);
+        throw new Error('Failed to fetch projects');
+      }
+      
+      const data = await response.json();
+      console.log('Projects fetched:', data);
+      
+      // Handle response format: { projects: [...], client: {...}, count: 2 }
+      const projects = data.projects || data || [];
+      console.log(`Returning ${projects.length} projects for client`);
+      return projects;
+    } catch (error) {
+      console.error("Error fetching projects:", error);
+      return [];
+    }
+  }, [filters.client]);
+
+  // Clear dependent filters only when their direct parent changes
   useEffect(() => {
+    // When geography changes, only clear filters that depend on geography chain
+    setFilters(prev => ({ 
+      ...prev, 
+      // Don't clear client - it's independent now
+      // Only clear if project depends on geography directly
+    }));
+  }, [filters.geography]);
+
+  useEffect(() => {
+    // When client changes, clear project and subproject
+    setFilters(prev => ({ ...prev, project: '', subProject: '' }));
+  }, [filters.client]);
+
+  useEffect(() => {
+    // When project changes, clear subproject
     setFilters(prev => ({ ...prev, subProject: '' }));
   }, [filters.project]);
 
@@ -582,6 +700,9 @@ const BillingDashboard = () => {
       }
       if (filters.geography) {
         params.append('geography_id', filters.geography);
+      }
+      if (filters.client) {
+        params.append('client_id', filters.client);
       }
       if (filters.project) {
         params.append('project_id', filters.project);
@@ -605,6 +726,7 @@ const BillingDashboard = () => {
 
     } catch (error) {
       console.error("Error loading dashboard:", error);
+      toast.error(error.message || 'Failed to load dashboard data');
       setDashboardData([]);
       setTotals(null);
     } finally {
@@ -612,7 +734,7 @@ const BillingDashboard = () => {
     }
   }, [filters, searchTerm]);
 
-  // Fetch allocation summary data WITH PAGINATION AND GEOGRAPHY FILTER
+  // Fetch allocation summary data WITH PAGINATION
   const fetchAllocationData = useCallback(async (page = 1) => {
     setIsLoading(true);
     
@@ -628,6 +750,9 @@ const BillingDashboard = () => {
       }
       if (filters.geography) {
         params.append('geography_id', filters.geography);
+      }
+      if (filters.client) {
+        params.append('client_id', filters.client);
       }
       if (filters.project) {
         params.append('project_id', filters.project);
@@ -664,6 +789,7 @@ const BillingDashboard = () => {
 
     } catch (error) {
       console.error("Error loading allocation data:", error);
+      toast.error(error.message || 'Failed to load allocation data');
       setDashboardData([]);
       setTotals(null);
       setGrandTotals(null);
@@ -696,7 +822,15 @@ const BillingDashboard = () => {
   const handleGeographyChange = (value) => {
     setFilters(prev => ({
       ...prev,
-      geography: value,
+      geography: value
+      // Don't clear client - it's independent now
+    }));
+  };
+
+  const handleClientChange = (value) => {
+    setFilters(prev => ({
+      ...prev,
+      client: value,
       project: '',
       subProject: ''
     }));
@@ -744,120 +878,147 @@ const BillingDashboard = () => {
     return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
   });
 
-  // Export to CSV
-  // pages/BillingDashboard.jsx - UPDATE exportToCSV FUNCTION
-
-const exportToCSV = async () => {
-  try {
-    toast.loading('Preparing export...');
+  // Export to CSV - FIXED VERSION
+  const exportToCSV = async () => {
+    const loadingToast = toast.loading('Preparing export...');
     
-    // Fetch ALL data for export (no pagination)
-    const params = new URLSearchParams({
-      year: filters.year
-    });
+    try {
+      // Build the same parameters as the view
+      const params = new URLSearchParams({
+        year: filters.year,
+        export: 'true' // Flag to skip pagination
+      });
 
-    if (filters.month !== 'all') {
-      params.append('month', filters.month);
-    }
-    if (filters.geography) {
-      params.append('geography_id', filters.geography);
-    }
-    if (filters.project) {
-      params.append('project_id', filters.project);
-    }
-    if (filters.subProject) {
-      params.append('subproject_id', filters.subProject);
-    }
-    if (searchTerm) {
-      params.append('search', searchTerm);
-    }
-    if (filters.startDate) {
-      params.append('start_date', filters.startDate);
-    }
-    if (filters.endDate) {
-      params.append('end_date', filters.endDate);
-    }
+      if (filters.month !== 'all') {
+        params.append('month', filters.month);
+      }
+      if (filters.geography) {
+        params.append('geography_id', filters.geography);
+      }
+      if (filters.client) {
+        params.append('client_id', filters.client);
+      }
+      if (filters.project) {
+        params.append('project_id', filters.project);
+      }
+      if (filters.subProject) {
+        params.append('subproject_id', filters.subProject);
+      }
+      if (searchTerm) {
+        params.append('search', searchTerm);
+      }
+      if (filters.startDate) {
+        params.append('start_date', filters.startDate);
+      }
+      if (filters.endDate) {
+        params.append('end_date', filters.endDate);
+      }
 
-    const response = await fetch(`${apiBaseUrl}/allocation/allocation-summary-export?${params}`);
-    const exportData = await response.json();
+      console.log('Export URL:', `${apiBaseUrl}/allocation/allocation-summary?${params}`);
 
-    if (!response.ok) {
-      throw new Error(exportData.message || 'Failed to export data');
-    }
+      const response = await fetch(`${apiBaseUrl}/allocation/allocation-summary?${params}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
 
-    const allData = exportData.data || [];
-    const exportTotals = exportData.totals || null;
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Export error response:', errorText);
+        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
+      }
 
-    toast.dismiss();
-    
-    if (allData.length === 0) {
-      toast.error('No data to export');
-      return;
-    }
+      const exportData = await response.json();
+      
+      toast.dismiss(loadingToast);
+      
+      const allData = exportData.data || [];
+      const exportTotals = useAllocationData ? exportData.grandTotals || exportData.totals : exportData.totals;
 
-    toast.success(`Exporting ${allData.length} records...`);
+      if (allData.length === 0) {
+        toast.error('No data to export');
+        return;
+      }
 
-    const headers = [
-      'Sr No', 'Locations', 'Process Type', 
-      'Duplicate', 'Total (Duplicate)', 
-      'Key', 'Total (Key)', 
-      'New Request', 'Total (New Request)',
-      'Total Cases/Hours', 'Total Billing', 'Geography'
-    ];
+      toast.success(`Exporting ${allData.length} records...`);
 
-    const rows = allData.map((row, idx) => [
-      idx + 1,
-      row.location,
-      row.processType,
-      row.duplicateHours,
-      row.duplicateTotal?.toFixed(2) || '0.00',
-      row.keyHours,
-      row.keyTotal?.toFixed(2) || '0.00',
-      row.newRequestHours,
-      row.newRequestTotal?.toFixed(2) || '0.00',
-      row.totalCasesHours,
-      row.totalBilling?.toFixed(2) || '0.00',
-      row.geographyType === 'onshore' ? 'US' : 'IND'
-    ]);
+      const headers = [
+        'Sr No', 'Locations', 'Process Type', 
+        'Duplicate', 'Total (Duplicate)', 
+        'Key', 'Total (Key)', 
+        'New Request', 'Total (New Request)',
+        'Total Cases/Hours', 'Total Billing', 'Geography'
+      ];
 
-    if (exportTotals) {
-      rows.push([
-        '', 'TOTALS', '',
-        exportTotals.duplicateHours,
-        exportTotals.duplicateTotal?.toFixed(2) || '0.00',
-        exportTotals.keyHours,
-        exportTotals.keyTotal?.toFixed(2) || '0.00',
-        exportTotals.newRequestHours,
-        exportTotals.newRequestTotal?.toFixed(2) || '0.00',
-        exportTotals.totalCasesHours,
-        exportTotals.totalBilling?.toFixed(2) || '0.00',
-        ''
+      const rows = allData.map((row, idx) => [
+        idx + 1,
+        row.location || '',
+        row.processType || '',
+        row.duplicateHours || 0,
+        (row.duplicateTotal || 0).toFixed(2),
+        row.keyHours || 0,
+        (row.keyTotal || 0).toFixed(2),
+        row.newRequestHours || 0,
+        (row.newRequestTotal || 0).toFixed(2),
+        row.totalCasesHours || 0,
+        (row.totalBilling || 0).toFixed(2),
+        row.geographyType === 'onshore' ? 'US' : 'IND'
       ]);
+
+      if (exportTotals) {
+        rows.push([
+          '', 'TOTALS', '',
+          exportTotals.duplicateHours || 0,
+          (exportTotals.duplicateTotal || 0).toFixed(2),
+          exportTotals.keyHours || 0,
+          (exportTotals.keyTotal || 0).toFixed(2),
+          exportTotals.newRequestHours || 0,
+          (exportTotals.newRequestTotal || 0).toFixed(2),
+          exportTotals.totalCasesHours || 0,
+          (exportTotals.totalBilling || 0).toFixed(2),
+          ''
+        ]);
+      }
+
+      // Escape CSV values properly
+      const escapeCSV = (val) => {
+        if (val === null || val === undefined) return '';
+        const str = String(val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const csvContent = [
+        headers.map(escapeCSV).join(','),
+        ...rows.map(row => row.map(escapeCSV).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      const dateRange = filters.startDate && filters.endDate 
+        ? `${filters.startDate}-to-${filters.endDate}`
+        : `${filters.year}-${filters.month !== 'all' ? filters.month : 'all'}`;
+      
+      a.download = `billing-dashboard-${dateRange}-${allData.length}-records.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`Successfully exported ${allData.length} records!`);
+
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.dismiss(loadingToast);
+      toast.error(error.message || 'Failed to export data. Check console for details.');
     }
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const dateRange = filters.startDate && filters.endDate 
-      ? `${filters.startDate}-to-${filters.endDate}`
-      : `${filters.year}-${filters.month || 'all'}`;
-    a.download = `billing-dashboard-${dateRange}-${allData.length}-records.csv`;
-    a.click();
-    
-    toast.success(`Successfully exported ${allData.length} records!`);
-
-  } catch (error) {
-    console.error('Export error:', error);
-    toast.dismiss();
-    toast.error(error.message || 'Failed to export data');
-  }
-};
+  };
 
   // Column definitions
   const columns = [
@@ -879,7 +1040,7 @@ const exportToCSV = async () => {
     <div className="bg-gray-50 min-h-screen">
       <PageHeader 
         heading="Billing Dashboard" 
-        subHeading="Aggregated view of billing by Location, Process Type, and Request Type" 
+        subHeading="Aggregated view of billing by Geography, Client, Location, Process Type, and Request Type" 
       />
 
       <div className="p-4 space-y-4">
@@ -888,7 +1049,6 @@ const exportToCSV = async () => {
           <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                {/* <div className="text-blue-600 text-2xl">📅</div> */}
                 <div>
                   <div className="text-sm font-semibold text-blue-900">
                     Latest Upload Data Range
@@ -957,52 +1117,65 @@ const exportToCSV = async () => {
                   onClick={() => setShowFormatModal(true)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
                 >
-                  {/* <span>📋</span> */}
                   <span>CSV Format</span>
                 </button>
                 <button
                   onClick={() => setShowUploadModal(true)}
                   className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center space-x-2"
                 >
-                  {/* <span>📤</span> */}
                   <span>Upload CSV</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Filters Grid - WITH GEOGRAPHY FILTER */}
+          {/* Filters Grid - WITH CLIENT FILTER */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
-            {/* Geography Filter - NEW */}
+            {/* Geography Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Geography</label>
               <select
                 id="geography"
                 value={filters.geography}
                 onChange={(e) => handleGeographyChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[42px] truncate"
+                title={geographiesData.find(g => g._id === filters.geography)?.name || 'Select Geography'}
               >
                 <option value="">All Geographies</option>
                 {geographiesData.map(g => (
-                  <option key={g._id} value={g._id}>{g.name}</option>
+                  <option key={g._id} value={g._id} title={g.name}>
+                    {g.name}
+                  </option>
                 ))}
               </select>
+            </div>
+
+            {/* Client Filter - NOW INDEPENDENT */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
+              <AsyncSelect
+                value={filters.client}
+                onChange={handleClientChange}
+                fetchOptions={fetchClientsAsync}
+                placeholder="Search clients..."
+                disabled={false} // Always enabled now
+                labelKey="name"
+                valueKey="_id"
+              />
             </div>
 
             {/* Project Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Process Type (Project)</label>
-              <select
-                id="project"
+              <AsyncSelect
                 value={filters.project}
-                onChange={(e) => handleProjectChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">All Projects</option>
-                {projectsData.map(p => (
-                  <option key={p._id} value={p._id}>{p.name}</option>
-                ))}
-              </select>
+                onChange={handleProjectChange}
+                fetchOptions={fetchProjectsAsync}
+                placeholder={!filters.client ? "Select client first" : "Search projects..."}
+                disabled={!filters.client}
+                labelKey="name"
+                valueKey="_id"
+              />
             </div>
 
             {/* Subproject Filter */}
@@ -1026,7 +1199,7 @@ const exportToCSV = async () => {
                 id="month"
                 value={filters.month}
                 onChange={handleFilterChange}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
               >
                 <option value="all">All Months</option>
                 {Array.from({ length: 12 }, (_, i) => (
@@ -1044,7 +1217,7 @@ const exportToCSV = async () => {
                 id="year"
                 value={filters.year}
                 onChange={handleFilterChange}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
               >
                 <option value="2027">2027</option>
                 <option value="2026">2026</option>
@@ -1062,7 +1235,7 @@ const exportToCSV = async () => {
                   id="startDate"
                   value={filters.startDate}
                   onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
                 />
               </div>
             )}
@@ -1076,7 +1249,7 @@ const exportToCSV = async () => {
                   id="endDate"
                   value={filters.endDate}
                   onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
                 />
               </div>
             )}
@@ -1089,7 +1262,7 @@ const exportToCSV = async () => {
                 placeholder="Search locations..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[42px]"
               />
             </div>
           </div>
@@ -1116,18 +1289,18 @@ const exportToCSV = async () => {
           <div className="flex justify-between items-center mt-4 pt-4 border-t">
             <div className="text-sm text-gray-600">
               Showing <span className="font-semibold">{sortedData.length}</span> records
-              {useAllocationData && latestUpload && !filters.startDate && !filters.endDate && (
+              {useAllocationData && pagination.totalItems > 0 && (
                 <span className="ml-2 text-gray-500">
-                  • Data till {formatDate(latestUpload.end_date)}
+                  of {pagination.totalItems} total
                 </span>
               )}
             </div>
             <button
               onClick={exportToCSV}
-              disabled={sortedData.length === 0}
+              disabled={sortedData.length === 0 || isLoading}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
             >
-              {/* <span>📥</span> */}
+              <span>📥</span>
               <span>Export CSV</span>
             </button>
           </div>
@@ -1197,7 +1370,7 @@ const exportToCSV = async () => {
           )}
         </div>
 
-        {/* Data Table - Same as before */}
+        {/* Data Table */}
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1260,10 +1433,12 @@ const exportToCSV = async () => {
                   <>
                     {sortedData.map((row, idx) => (
                       <tr 
-                        key={`${row.projectId}-${row.subprojectId}`} 
+                        key={`${row.projectId}-${row.subprojectId}-${idx}`} 
                         className="hover:bg-gray-50 transition-colors"
                       >
-                        <td className="py-3 px-3 text-sm text-gray-600">{idx + 1}</td>
+                        <td className="py-3 px-3 text-sm text-gray-600">
+                          {(pagination.currentPage - 1) * pagination.itemsPerPage + idx + 1}
+                        </td>
                         <td className="py-3 px-3 text-sm font-medium text-gray-900">{row.location}</td>
                         <td className="py-3 px-3 text-sm text-gray-700">{row.processType}</td>
                         
@@ -1361,8 +1536,8 @@ const exportToCSV = async () => {
               <div className="text-2xl font-bold text-gray-900 mt-1">
                 {formatNumber(grandTotals.duplicateHours)} cases
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Across all {pagination.totalItems} locations
+              <div className="text-lg font-semibold text-orange-600">
+                {formatCurrency(grandTotals.duplicateTotal)}
               </div>
             </div>
             
@@ -1371,8 +1546,8 @@ const exportToCSV = async () => {
               <div className="text-2xl font-bold text-gray-900 mt-1">
                 {formatNumber(grandTotals.keyHours)} cases
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Across all {pagination.totalItems} locations
+              <div className="text-lg font-semibold text-purple-600">
+                {formatCurrency(grandTotals.keyTotal)}
               </div>
             </div>
             
@@ -1381,8 +1556,8 @@ const exportToCSV = async () => {
               <div className="text-2xl font-bold text-gray-900 mt-1">
                 {formatNumber(grandTotals.newRequestHours)} cases
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Across all {pagination.totalItems} locations
+              <div className="text-lg font-semibold text-blue-600">
+                {formatCurrency(grandTotals.newRequestTotal)}
               </div>
             </div>
             
@@ -1391,8 +1566,8 @@ const exportToCSV = async () => {
               <div className="text-2xl font-bold text-gray-900 mt-1">
                 {formatNumber(grandTotals.totalCasesHours)} cases
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Across all {pagination.totalItems} locations
+              <div className="text-lg font-semibold text-green-600">
+                {formatCurrency(grandTotals.totalBilling)}
               </div>
             </div>
           </div>
