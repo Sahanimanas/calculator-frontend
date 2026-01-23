@@ -1,3 +1,4 @@
+// pages/ResourcesPage.jsx - With assignment count badges and full view modal
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import axios from "axios";
 import {
@@ -10,30 +11,35 @@ import {
   XMarkIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  MagnifyingGlassIcon,
+  EyeIcon,
+  MapPinIcon,
+  BuildingOfficeIcon,
+  FolderIcon,
 } from "@heroicons/react/24/outline";
-import { createPortal } from "react-dom";
 import ConfirmDeleteProjectModal from "../components/Project/ConfirmDeleteProjectModal";
 import toast from "react-hot-toast";
 
 const apiBaseUrl = import.meta.env.VITE_BACKEND_URL;
 
-// --- OPTIMIZED API SERVICE ---
+// --- API SERVICE ---
 const apiService = {
   getResources: (params) => axios.get(`${apiBaseUrl}/resource`, { params }),
-  
-  // NEW: Search endpoints with pagination
-  searchProjects: (params) => axios.get(`${apiBaseUrl}/resource/search-projects`, { params }),
-  searchSubprojects: (params) => axios.get(`${apiBaseUrl}/resource/search-subprojects`, { params }),
-  
   addResource: (resourceData) => axios.post(`${apiBaseUrl}/resource`, resourceData),
   updateResource: (id, resourceData) => axios.put(`${apiBaseUrl}/resource/${id}`, resourceData),
   deleteResource: (id) => axios.delete(`${apiBaseUrl}/resource/${id}`),
+  
   uploadResourceCSV: (formData) =>
-    axios.post(`${apiBaseUrl}/upload-resource/bul`, formData, {
+    axios.post(`${apiBaseUrl}/upload-resource/bulk`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      responseType: "blob",
     }),
+  uploadResourceCSVReplace: (formData) =>
+    axios.post(`${apiBaseUrl}/upload-resource/bulk-replace`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+    
+  getGeographies: (params) => axios.get(`${apiBaseUrl}/geography`, { params }),
+  getClients: (geoId, params) => axios.get(`${apiBaseUrl}/client/geography/${geoId}`, { params }),
+  getProjects: (clientId, params) => axios.get(`${apiBaseUrl}/project/client/${clientId}`, { params }),
 };
 
 // --- DEBOUNCE HOOK ---
@@ -48,182 +54,18 @@ function useDebounce(value, delay) {
   return debouncedValue;
 }
 
-// --- ASYNC SEARCHABLE SELECT COMPONENT ---
-const AsyncSearchSelect = React.memo(({
-  placeholder = "Search...",
-  value = [], // Array of { value, label }
-  onChange,
-  fetchOptions, // async function(search) => { options: [], hasMore: bool }
-  isMulti = false,
-  disabled = false,
-  className = "",
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [options, setOptions] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const containerRef = useRef(null);
-  const inputRef = useRef(null);
-  
-  const debouncedSearch = useDebounce(search, 300);
-
-  // Close on outside click
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Fetch options on search change
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const loadOptions = async () => {
-      setIsLoading(true);
-      try {
-        const result = await fetchOptions(debouncedSearch);
-        setOptions(result.options || []);
-        setHasMore(result.hasMore || false);
-      } catch (err) {
-        console.error("Failed to fetch options:", err);
-        setOptions([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    loadOptions();
-  }, [debouncedSearch, isOpen, fetchOptions]);
-
-  const handleSelect = useCallback((option) => {
-    if (isMulti) {
-      const exists = value.some(v => v.value === option.value);
-      if (!exists) {
-        onChange([...value, option]);
-      }
-    } else {
-      onChange([option]);
-      setIsOpen(false);
-    }
-    setSearch("");
-  }, [isMulti, value, onChange]);
-
-  const handleRemove = useCallback((optionValue) => {
-    onChange(value.filter(v => v.value !== optionValue));
-  }, [value, onChange]);
-
-  const filteredOptions = useMemo(() => {
-    const selectedIds = new Set(value.map(v => v.value));
-    return options.filter(opt => !selectedIds.has(opt.value));
-  }, [options, value]);
-
-  const displayValue = useMemo(() => {
-    if (!isMulti && value.length > 0) return value[0].label;
-    return "";
-  }, [isMulti, value]);
-
-  return (
-    <div ref={containerRef} className={`relative ${className}`}>
-      {/* Selected Tags (Multi) */}
-      {isMulti && value.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {value.map((item) => (
-            <span
-              key={item.value}
-              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-md"
-            >
-              <span className="truncate max-w-[150px]">{item.label}</span>
-              <button
-                type="button"
-                onClick={() => handleRemove(item.value)}
-                className="text-blue-600 hover:text-blue-800"
-              >
-                <XMarkIcon className="w-3 h-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Input */}
-      <div
-        className={`flex items-center border border-gray-300 rounded-lg px-3 py-2 bg-white cursor-pointer ${
-          disabled ? "bg-gray-100 cursor-not-allowed" : "hover:border-gray-400"
-        }`}
-        onClick={() => !disabled && setIsOpen(true)}
-      >
-        <MagnifyingGlassIcon className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
-        <input
-          ref={inputRef}
-          type="text"
-          value={isOpen ? search : displayValue}
-          onChange={(e) => setSearch(e.target.value)}
-          onFocus={() => !disabled && setIsOpen(true)}
-          placeholder={value.length === 0 ? placeholder : isMulti ? "Add more..." : placeholder}
-          disabled={disabled}
-          className="flex-1 outline-none text-sm bg-transparent min-w-0"
-        />
-        <ChevronDownIcon className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-      </div>
-
-      {/* Dropdown */}
-      {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
-          {isLoading ? (
-            <div className="px-4 py-3 text-sm text-gray-500 text-center">
-              <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
-              Loading...
-            </div>
-          ) : filteredOptions.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-gray-500 text-center">
-              {search ? "No results found" : "Type to search..."}
-            </div>
-          ) : (
-            <>
-              {filteredOptions.map((option) => (
-                <div
-                  key={option.value}
-                  onClick={() => handleSelect(option)}
-                  className="px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                >
-                  {option.label}
-                </div>
-              ))}
-              {hasMore && (
-                <div className="px-4 py-2 text-xs text-gray-400 text-center border-t">
-                  Type more to refine results...
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-
-AsyncSearchSelect.displayName = "AsyncSearchSelect";
-
-// --- SIMPLE FILTER SELECT (for page filters - loads first 20 on open) ---
+// --- FILTER SELECT COMPONENT ---
 const FilterSelect = React.memo(({
   placeholder,
   value,
   onChange,
-  fetchOptions,
+  options = [],
   disabled = false,
+  loading = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [options, setOptions] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
   const containerRef = useRef(null);
-  
-  const debouncedSearch = useDebounce(search, 300);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -236,23 +78,12 @@ const FilterSelect = React.memo(({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const loadOptions = async () => {
-      setIsLoading(true);
-      try {
-        const result = await fetchOptions(debouncedSearch);
-        setOptions(result.options || []);
-      } catch (err) {
-        console.error("Failed to fetch options:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    loadOptions();
-  }, [debouncedSearch, isOpen, fetchOptions]);
+  const filteredOptions = useMemo(() => {
+    if (!search) return options;
+    return options.filter(o => 
+      o.label.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [options, search]);
 
   const selectedLabel = useMemo(() => {
     if (!value) return null;
@@ -265,11 +96,11 @@ const FilterSelect = React.memo(({
       <div
         onClick={() => !disabled && setIsOpen(!isOpen)}
         className={`flex items-center justify-between border border-gray-300 rounded-xl px-4 py-2 bg-white cursor-pointer ${
-          disabled ? "bg-gray-100" : "hover:border-gray-400"
+          disabled ? "bg-gray-100 cursor-not-allowed" : "hover:border-gray-400"
         }`}
       >
         <span className={`text-sm ${value ? "text-gray-900" : "text-gray-500"}`}>
-          {selectedLabel || placeholder}
+          {loading ? "Loading..." : (selectedLabel || placeholder)}
         </span>
         <ChevronDownIcon className={`w-4 h-4 text-gray-400 ${isOpen ? "rotate-180" : ""}`} />
       </div>
@@ -287,7 +118,6 @@ const FilterSelect = React.memo(({
             />
           </div>
           <div className="max-h-48 overflow-auto">
-            {/* Clear option */}
             <div
               onClick={() => { onChange(""); setIsOpen(false); setSearch(""); }}
               className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 cursor-pointer"
@@ -295,12 +125,10 @@ const FilterSelect = React.memo(({
               {placeholder}
             </div>
             
-            {isLoading ? (
-              <div className="px-4 py-3 text-sm text-gray-500 text-center">Loading...</div>
-            ) : options.length === 0 ? (
+            {filteredOptions.length === 0 ? (
               <div className="px-4 py-3 text-sm text-gray-500 text-center">No results</div>
             ) : (
-              options.map((option) => (
+              filteredOptions.map((option) => (
                 <div
                   key={option.value}
                   onClick={() => { onChange(option.value); setIsOpen(false); setSearch(""); }}
@@ -321,284 +149,154 @@ const FilterSelect = React.memo(({
 
 FilterSelect.displayName = "FilterSelect";
 
-// --- MEMOIZED DROPDOWN COMPONENT (for table cells) ---
-const DropdownList = React.memo(({ items }) => {
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState("bottom");
-  const [coords, setCoords] = useState(null);
-  const ref = useRef(null);
-
-  const arr = useMemo(() => {
-    if (!items) return [];
-    return Array.isArray(items) ? items : [items];
-  }, [items]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
-
-  useEffect(() => {
-    if (open && ref.current) {
-      const rect = ref.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const estimatedMenuHeight = 150;
-      const newPosition = spaceBelow < estimatedMenuHeight && rect.top > spaceBelow ? "top" : "bottom";
-      setPosition(newPosition);
-      setCoords({ left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width });
+// --- ASSIGNMENT COUNT BADGE ---
+const AssignmentBadge = React.memo(({ assignments, onClick }) => {
+  const counts = useMemo(() => {
+    if (!assignments || !Array.isArray(assignments)) {
+      return { projects: 0, locations: 0 };
     }
-  }, [open]);
+    
+    let locationCount = 0;
+    const projectCount = assignments.length;
+    
+    for (const assignment of assignments) {
+      if (assignment.subprojects && Array.isArray(assignment.subprojects)) {
+        locationCount += assignment.subprojects.length;
+      }
+    }
+    
+    return { projects: projectCount, locations: locationCount };
+  }, [assignments]);
 
-  const displayText = useMemo(() => {
-    if (!arr.length) return null;
-    return arr.length === 1 ? arr[0] : `${arr[0]} +${arr.length - 1}`;
-  }, [arr]);
-
-  if (!arr.length) return <span className="text-gray-500">Unassigned</span>;
-
-  const DropdownMenu = coords && (
-    <div
-      style={{
-        position: "fixed",
-        left: `${coords.left}px`,
-        top: position === "bottom" ? `${coords.bottom + 4}px` : "",
-        bottom: position === "top" ? `${window.innerHeight - coords.top + 4}px` : "",
-        width: "224px",
-        zIndex: 10000,
-      }}
-      className="bg-white border border-gray-200 rounded-md shadow-lg"
-    >
-      <ul className="text-sm text-gray-800" style={{ maxHeight: "12rem", overflowY: "auto" }}>
-        {arr.map((item, idx) => (
-          <li key={idx} className="px-3 py-2 hover:bg-gray-100 cursor-pointer">{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
+  if (counts.locations === 0) {
+    return <span className="text-gray-400 text-sm">No assignments</span>;
+  }
 
   return (
-    <div className="inline-block" ref={ref}>
-      <button 
-        type="button" 
-        onClick={() => setOpen((v) => !v)} 
-        className="flex items-center align-left gap-1 px-4 py-1 border border-gray-300 rounded-md hover:bg-gray-100 text-sm text-gray-700"
-      >
-        <span className="truncate max-w-[180px] font-semibold block">{displayText}</span>
-        <ChevronDownIcon className="w-4 h-4 text-gray-500" />
-      </button>
-      {open && createPortal(DropdownMenu, document.body)}
-    </div>
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition text-sm font-medium"
+    >
+      <span>{counts.projects} Project{counts.projects !== 1 ? 's' : ''}</span>
+      <span className="text-blue-400">•</span>
+      <span>{counts.locations} Location{counts.locations !== 1 ? 's' : ''}</span>
+      <EyeIcon className="w-4 h-4 ml-1" />
+    </button>
   );
 });
 
-DropdownList.displayName = 'DropdownList';
+AssignmentBadge.displayName = "AssignmentBadge";
 
-// --- OPTIMIZED MODAL COMPONENT ---
-const ResourceModal = React.memo(({
-  isOpen,
-  onClose,
-  resource,
-  onSave,
-}) => {
-  const initialFormState = useMemo(() => ({
-    name: "",
-    email: "",
-    role: "",
-    avatar_url: "",
-    assigned_projects: [], // Array of { value, label }
-    assigned_subprojects: [], // Array of { value, label }
-    isBillable: true,
-  }), []);
+// --- VIEW ASSIGNMENTS MODAL ---
+const ViewAssignmentsModal = React.memo(({ isOpen, onClose, resource }) => {
+  if (!isOpen || !resource) return null;
 
-  const [formData, setFormData] = useState(initialFormState);
-  const [isFormValid, setIsFormValid] = useState(false);
-  const isEditMode = !!resource;
-
-  // Load existing data when editing
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    const loadResourceData = async () => {
-      if (isEditMode && resource) {
-        const projectIds = resource.assigned_projects?.map((p) => p._id || p).filter(Boolean) || [];
-        const subprojectIds = resource.assigned_subprojects?.map((sp) => sp._id || sp).filter(Boolean) || [];
-        
-        // Fetch labels for existing IDs
-        const [projectsRes, subprojectsRes] = await Promise.all([
-          projectIds.length > 0 
-            ? apiService.searchProjects({ ids: projectIds.join(',') })
-            : Promise.resolve({ data: { projects: [] } }),
-          subprojectIds.length > 0
-            ? apiService.searchSubprojects({ ids: subprojectIds.join(',') })
-            : Promise.resolve({ data: { subprojects: [] } }),
-        ]);
-
-        setFormData({
-          name: resource.name || "",
-          email: resource.email || "",
-          role: resource.role || "",
-          avatar_url: resource.avatar_url || "",
-          assigned_projects: projectsRes.data.projects || [],
-          assigned_subprojects: subprojectsRes.data.subprojects || [],
-          isBillable: resource.isBillable !== undefined ? resource.isBillable : true,
-        });
-      } else {
-        setFormData(initialFormState);
-      }
-    };
-    
-    loadResourceData();
-  }, [resource, isEditMode, isOpen, initialFormState]);
-
-  const validateEmail = useCallback((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), []);
-
-  useEffect(() => {
-    const { name, role, email } = formData;
-    setIsFormValid(name.trim() && role.trim() && validateEmail(email));
-  }, [formData, validateEmail]);
-
-  const handleStandardChange = useCallback((e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  }, []);
-
-  // Fetch functions for async selects
-  const fetchProjects = useCallback(async (search) => {
-    const res = await apiService.searchProjects({ search, limit: 20 });
-    return { options: res.data.projects, hasMore: res.data.hasMore };
-  }, []);
-
-  const fetchSubprojects = useCallback(async (search) => {
-    const projectIds = formData.assigned_projects.map(p => p.value).join(',');
-    const res = await apiService.searchSubprojects({ 
-      search, 
-      limit: 20,
-      project_ids: projectIds || undefined 
-    });
-    return { options: res.data.subprojects, hasMore: res.data.hasMore };
-  }, [formData.assigned_projects]);
-
-  const handleSubmit = useCallback(() => {
-    if (!isFormValid) return;
-    
-    // Convert to IDs only for API
-    const submitData = {
-      ...formData,
-      assigned_projects: formData.assigned_projects.map(p => p.value),
-      assigned_subprojects: formData.assigned_subprojects.map(sp => sp.value),
-    };
-    
-    onSave(submitData, resource?._id);
-    onClose();
-  }, [isFormValid, formData, resource, onSave, onClose]);
-
-  if (!isOpen) return null;
+  const assignments = resource.assignments || [];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-8 relative max-h-[90vh] overflow-y-auto">
-        <button onClick={onClose} className="absolute top-6 right-6 text-gray-400 hover:text-gray-600">
-          <XMarkIcon className="w-6 h-6" />
-        </button>
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">
-          {isEditMode ? "Edit Resource" : "Add New Resource"}
-        </h2>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div className="flex items-center gap-3">
+            <img 
+              src={`https://ui-avatars.com/api/?name=${encodeURIComponent(resource.name)}&background=3b82f6&color=fff`} 
+              alt={resource.name} 
+              className="w-10 h-10 rounded-full" 
+            />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Select Projects</label>
-              <AsyncSearchSelect
-                placeholder="Search projects..."
-                value={formData.assigned_projects}
-                onChange={(projects) => setFormData(prev => ({ 
-                  ...prev, 
-                  assigned_projects: projects,
-                  // Clear subprojects when projects change
-                  assigned_subprojects: prev.assigned_subprojects.filter(sp => 
-                    projects.some(p => p.value === sp.project_id)
-                  )
-                }))}
-                fetchOptions={fetchProjects}
-                isMulti={true}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Select Sub-projects</label>
-              <AsyncSearchSelect
-                placeholder={formData.assigned_projects.length === 0 ? "Select projects first..." : "Search sub-projects..."}
-                value={formData.assigned_subprojects}
-                onChange={(subprojects) => setFormData(prev => ({ ...prev, assigned_subprojects: subprojects }))}
-                fetchOptions={fetchSubprojects}
-                isMulti={true}
-                disabled={formData.assigned_projects.length === 0}
-              />
+              <h2 className="text-lg font-bold text-gray-900">{resource.name}</h2>
+              <p className="text-sm text-gray-500">{resource.email}</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Full Name*</label>
-              <input 
-                type="text" 
-                name="name" 
-                value={formData.name} 
-                onChange={handleStandardChange} 
-                required 
-                className="w-full border border-gray-300 rounded-lg px-3 py-2" 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Role*</label>
-              <input 
-                type="text" 
-                name="role" 
-                value={formData.role} 
-                onChange={handleStandardChange} 
-                className="w-full border border-gray-300 rounded-lg px-3 py-2" 
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email*</label>
-              <input 
-                type="email" 
-                name="email" 
-                value={formData.email} 
-                onChange={handleStandardChange} 
-                className="w-full border border-gray-300 rounded-lg px-3 py-2" 
-              />
-            </div>
-          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-lg transition">
+            <XMarkIcon className="w-6 h-6" />
+          </button>
         </div>
-        <div className="flex justify-end gap-4 mt-8">
-          <button 
-            onClick={onClose} 
-            className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-semibold"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={handleSubmit} 
-            disabled={!isFormValid} 
-            className={`px-6 py-2 rounded-lg font-semibold text-white ${
-              isFormValid ? "bg-blue-500 hover:bg-blue-700" : "bg-gray-300 cursor-not-allowed"
-            }`}
-          >
-            {isEditMode ? "Update Resource" : "Add Resource"}
-          </button>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {assignments.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <MapPinIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p>No assignments found</p>
+              <p className="text-sm mt-1">Upload a CSV to assign locations to this resource</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {assignments.map((assignment, idx) => (
+                <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden">
+                  {/* Assignment Header */}
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                    <div className="flex items-center gap-6 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500">Geography:</span>
+                        <span className="font-medium text-gray-900">{assignment.geography_name || '—'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <BuildingOfficeIcon className="w-4 h-4 text-gray-400" />
+                        <span className="text-gray-500">Client:</span>
+                        <span className="font-medium text-gray-900">{assignment.client_name || '—'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FolderIcon className="w-4 h-4 text-gray-400" />
+                        <span className="text-gray-500">Process Type:</span>
+                        <span className="font-medium text-blue-600">{assignment.project_name || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Locations */}
+                  <div className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <MapPinIcon className="w-4 h-4 text-green-600" />
+                      <span className="text-sm font-medium text-gray-700">
+                        Locations ({assignment.subprojects?.length || 0})
+                      </span>
+                    </div>
+                    
+                    {assignment.subprojects && assignment.subprojects.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {assignment.subprojects.map((sp, spIdx) => (
+                          <span 
+                            key={spIdx}
+                            className="inline-flex items-center px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-sm font-medium border border-green-200"
+                          >
+                            {sp.subproject_name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">No locations assigned</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-500">
+              Total: {assignments.length} Project{assignments.length !== 1 ? 's' : ''}, {' '}
+              {assignments.reduce((acc, a) => acc + (a.subprojects?.length || 0), 0)} Location{assignments.reduce((acc, a) => acc + (a.subprojects?.length || 0), 0) !== 1 ? 's' : ''}
+            </div>
+            <button 
+              onClick={onClose}
+              className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 });
 
-ResourceModal.displayName = 'ResourceModal';
+ViewAssignmentsModal.displayName = "ViewAssignmentsModal";
 
 // --- MAIN COMPONENT ---
 export default function ResourcesPage() {
@@ -606,23 +304,93 @@ export default function ResourcesPage() {
   const [resourceId, setResourceId] = useState();
   const [confirmDeleteResource, setConfirmDeleteResource] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [modalState, setModalState] = useState({ type: null, data: null });
+  const [showFormatInfo, setShowFormatInfo] = useState(false);
+  
+  // View assignments modal
+  const [viewAssignmentsModal, setViewAssignmentsModal] = useState({ isOpen: false, resource: null });
   
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
+  // Hierarchical filter data
+  const [geographies, setGeographies] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [loadingFilters, setLoadingFilters] = useState({ geo: false, client: false, project: false });
+
   const [filters, setFilters] = useState({ 
+    geography: "",
+    client: "",
     project: "", 
-    subProject: "", 
-    billableStatus: "", 
     search: "" 
   });
   
   const debouncedSearch = useDebounce(filters.search, 400);
 
-  // Fetch resources when filters or pagination changes
+  // Fetch geographies on mount
+  useEffect(() => {
+    const fetchGeographies = async () => {
+      setLoadingFilters(prev => ({ ...prev, geo: true }));
+      try {
+        const res = await apiService.getGeographies({ limit: 100 });
+        const geos = res.data.geographies || [];
+        setGeographies(geos.map(g => ({ value: g._id, label: g.name })));
+      } catch (err) {
+        console.error("Failed to fetch geographies:", err);
+      } finally {
+        setLoadingFilters(prev => ({ ...prev, geo: false }));
+      }
+    };
+    fetchGeographies();
+  }, []);
+
+  // Fetch clients when geography changes
+  useEffect(() => {
+    if (!filters.geography) {
+      setClients([]);
+      return;
+    }
+
+    const fetchClients = async () => {
+      setLoadingFilters(prev => ({ ...prev, client: true }));
+      try {
+        const res = await apiService.getClients(filters.geography, { limit: 100 });
+        const clientsData = res.data.clients || [];
+        setClients(clientsData.map(c => ({ value: c._id, label: c.name })));
+      } catch (err) {
+        console.error("Failed to fetch clients:", err);
+      } finally {
+        setLoadingFilters(prev => ({ ...prev, client: false }));
+      }
+    };
+    fetchClients();
+  }, [filters.geography]);
+
+  // Fetch projects when client changes
+  useEffect(() => {
+    if (!filters.client) {
+      setProjects([]);
+      return;
+    }
+
+    const fetchProjects = async () => {
+      setLoadingFilters(prev => ({ ...prev, project: true }));
+      try {
+        const res = await apiService.getProjects(filters.client, { limit: 100 });
+        const projectsData = res.data.projects || [];
+        setProjects(projectsData.map(p => ({ value: p._id, label: p.name })));
+      } catch (err) {
+        console.error("Failed to fetch projects:", err);
+      } finally {
+        setLoadingFilters(prev => ({ ...prev, project: false }));
+      }
+    };
+    fetchProjects();
+  }, [filters.client]);
+
+  // Fetch resources
   const fetchResources = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -630,17 +398,14 @@ export default function ResourcesPage() {
         page: currentPage,
         limit: itemsPerPage,
         search: debouncedSearch || undefined,
-        project_id: filters.project || undefined,
-        subproject_id: filters.subProject || undefined,
-        billable_status: filters.billableStatus || undefined,
       };
 
       const res = await apiService.getResources(queryParams);
 
       if (res.data?.resources) {
         setResources(res.data.resources);
-        setTotalPages(res.data.totalPages || 1);
-        setTotalItems(res.data.totalResources || 0);
+        setTotalPages(res.data.pagination?.pages || Math.ceil(res.data.pagination?.total / itemsPerPage) || 1);
+        setTotalItems(res.data.pagination?.total || res.data.resources.length);
       } else {
         setResources([]);
         setTotalPages(1);
@@ -652,26 +417,10 @@ export default function ResourcesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearch, filters.project, filters.subProject, filters.billableStatus]);
+  }, [currentPage, itemsPerPage, debouncedSearch]);
 
   useEffect(() => {
     fetchResources();
-  }, [fetchResources]);
-
-  const handleSaveResource = useCallback(async (formData, resourceId) => {
-    try {
-      if (resourceId) {
-        await apiService.updateResource(resourceId, formData);
-        toast.success("Resource updated successfully");
-      } else {
-        await apiService.addResource(formData);
-        toast.success("Resource added successfully");
-      }
-      fetchResources();
-    } catch (error) {
-      console.error("Failed to save resource:", error);
-      toast.error("Failed to save resource");
-    }
   }, [fetchResources]);
 
   const getResourceName = useCallback((resourceId) => {
@@ -696,26 +445,11 @@ export default function ResourcesPage() {
     setCurrentPage(1);
   }, []);
 
-  // Fetch functions for filter dropdowns
-  const fetchProjectsForFilter = useCallback(async (search) => {
-    const res = await apiService.searchProjects({ search, limit: 20 });
-    return { options: res.data.projects };
-  }, []);
-
-  const fetchSubprojectsForFilter = useCallback(async (search) => {
-    const res = await apiService.searchSubprojects({ 
-      search, 
-      limit: 20,
-      project_ids: filters.project || undefined 
-    });
-    return { options: res.data.subprojects };
-  }, [filters.project]);
-
-  const handleCSVUpload = useCallback(async (event) => {
+  const handleCSVUpload = useCallback(async (event, replaceMode = false) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    if (file.type !== "text/csv") {
+    if (file.type !== "text/csv" && !file.name.endsWith('.csv')) {
       toast.error("Please upload a valid CSV file");
       return;
     }
@@ -725,24 +459,63 @@ export default function ResourcesPage() {
 
     const toastId = toast.loading("Uploading CSV...");
     try {
-      await apiService.uploadResourceCSV(formData);
-      toast.success("CSV uploaded successfully", { id: toastId });
+      const uploadFn = replaceMode 
+        ? apiService.uploadResourceCSVReplace 
+        : apiService.uploadResourceCSV;
+      
+      const res = await uploadFn(formData);
+      
+      if (res.status === 207) {
+        const blob = new Blob([res.data], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "resource-upload-errors.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        const stats = JSON.parse(res.headers["x-stats"] || "{}");
+        toast.error(`Some rows failed. Created: ${stats.created || 0}, Updated: ${stats.updated || 0}. Check downloaded CSV.`, { id: toastId, duration: 5000 });
+      } else {
+        const { stats } = res.data;
+        toast.success(`Created: ${stats.created}, Updated: ${stats.updated}, Assignments: ${stats.assignments}`, { id: toastId });
+      }
+      
       fetchResources();
     } catch (err) {
       console.error("CSV upload error:", err);
-      toast.error("Error uploading CSV", { id: toastId });
+      
+      if (err.response?.status === 207) {
+        const blob = new Blob([err.response.data], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "resource-upload-errors.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.error("Some rows failed. Check downloaded CSV.", { id: toastId });
+        fetchResources();
+      } else {
+        toast.error(err.response?.data?.error || "Error uploading CSV", { id: toastId });
+      }
     } finally {
       event.target.value = "";
     }
   }, [fetchResources]);
 
   const handleDownloadTemplate = useCallback(() => {
-    const csvHeader = "name,email,role,projects\n";
-    const blob = new Blob([csvHeader], { type: "text/csv;charset=utf-8;" });
+    const csvContent = `Name,Location,Process Type,Client,Geography,Email ID
+Rashmi Kottachery,Christus Health,Complete logging,MRO,US,rashmi@valerionhealth.us
+Rashmi Kottachery,Banner Health,Complete logging,MRO,US,rashmi@valerionhealth.us
+Rashmi Kottachery,Duke_Processing,Processing,MRO,US,rashmi@valerionhealth.us
+Farheen Hasham,Banner Health_Processing,Processing,MRO,US,farheen@valerionhealth.us
+Farheen Hasham,Christus Health,Complete logging,MRO,US,farheen@valerionhealth.us`;
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "resource-template.csv";
+    a.download = "resource-upload-template.csv";
     a.click();
     URL.revokeObjectURL(url);
   }, []);
@@ -758,13 +531,18 @@ export default function ResourcesPage() {
     setCurrentPage(1);
   }, []);
 
+  const clearFilters = useCallback(() => {
+    setFilters({ geography: "", client: "", project: "", search: "" });
+    setCurrentPage(1);
+  }, []);
+
   return (
     <>
-      <ResourceModal
-        isOpen={!!modalState.type}
-        onClose={() => setModalState({ type: null, data: null })}
-        resource={modalState.data}
-        onSave={handleSaveResource}
+      {/* View Assignments Modal */}
+      <ViewAssignmentsModal
+        isOpen={viewAssignmentsModal.isOpen}
+        onClose={() => setViewAssignmentsModal({ isOpen: false, resource: null })}
+        resource={viewAssignmentsModal.resource}
       />
       
       <div id="main-content" className="flex-1 p-4">
@@ -772,94 +550,159 @@ export default function ResourcesPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Resource Assignment</h1>
-              <p className="text-gray-500">Assign resources to projects and sub-projects</p>
+              <p className="text-gray-500">Assign resources to projects and locations</p>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <button 
                 onClick={handleDownloadTemplate} 
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-gray-200"
+                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-gray-200 text-sm"
               >
                 <ArrowDownTrayIcon className="w-5 h-5" />
-                <span>Download Template</span>
+                <span>Template</span>
               </button>
-              <label className="cursor-pointer bg-gray-100 text-gray-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-gray-200">
+              
+              <label className="cursor-pointer bg-green-100 text-green-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-green-200 text-sm">
                 <ArrowUpTrayIcon className="w-5 h-5" />
                 <span>Upload CSV</span>
-                <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
+                <input type="file" accept=".csv" onChange={(e) => handleCSVUpload(e, false)} className="hidden" />
               </label>
-              <button 
-                onClick={() => setModalState({ type: "add", data: null })} 
-                className="bg-blue-300 text-gray-900 px-4 py-2 rounded-xl text-lg flex items-center space-x-2 hover:bg-blue-400"
-              >
-                <PlusIcon className="w-7 h-7" />
-                <span>Add Resource</span>
-              </button>
+              
+              <label className="cursor-pointer bg-orange-100 text-orange-700 px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-orange-200 text-sm" title="Replaces existing assignments">
+                <ArrowUpTrayIcon className="w-5 h-5" />
+                <span>Replace CSV</span>
+                <input type="file" accept=".csv" onChange={(e) => handleCSVUpload(e, true)} className="hidden" />
+              </label>
             </div>
           </div>
         </header>
 
+        {/* Filters Section */}
         <div id="filters-section" className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="grid grid-cols-4 gap-6 flex-1">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Project</label>
-                <FilterSelect
-                  placeholder="All Projects"
-                  value={filters.project}
-                  onChange={(value) => {
-                    setFilters(prev => ({ ...prev, project: value, subProject: "" }));
-                    setCurrentPage(1);
-                  }}
-                  fetchOptions={fetchProjectsForFilter}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Sub-Project</label>
-                <FilterSelect
-                  placeholder="All Sub-Projects"
-                  value={filters.subProject}
-                  onChange={(value) => {
-                    setFilters(prev => ({ ...prev, subProject: value }));
-                    setCurrentPage(1);
-                  }}
-                  fetchOptions={fetchSubprojectsForFilter}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Search Resource</label>
-                <input 
-                  type="text" 
-                  name="search" 
-                  value={filters.search} 
-                  onChange={handleSearchChange} 
-                  placeholder="Search by name, role, or email..." 
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent" 
-                />
-              </div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+            {(filters.geography || filters.client || filters.project || filters.search) && (
+              <button
+                onClick={clearFilters}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-5 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Geography</label>
+              <FilterSelect
+                placeholder="All Geographies"
+                value={filters.geography}
+                onChange={(value) => {
+                  setFilters(prev => ({ ...prev, geography: value, client: "", project: "" }));
+                  setCurrentPage(1);
+                }}
+                options={geographies}
+                loading={loadingFilters.geo}
+              />
             </div>
-            <div className="ml-6">
-              <span className="inline-flex items-center px-3 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
-                Total: {totalItems} Resources
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Client</label>
+              <FilterSelect
+                placeholder="All Clients"
+                value={filters.client}
+                onChange={(value) => {
+                  setFilters(prev => ({ ...prev, client: value, project: "" }));
+                  setCurrentPage(1);
+                }}
+                options={clients}
+                disabled={!filters.geography}
+                loading={loadingFilters.client}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Process Type</label>
+              <FilterSelect
+                placeholder="All Process Types"
+                value={filters.project}
+                onChange={(value) => {
+                  setFilters(prev => ({ ...prev, project: value }));
+                  setCurrentPage(1);
+                }}
+                options={projects}
+                disabled={!filters.client}
+                loading={loadingFilters.project}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Search Resource</label>
+              <input 
+                type="text" 
+                name="search" 
+                value={filters.search} 
+                onChange={handleSearchChange} 
+                placeholder="Name or email..." 
+                className="w-full border border-gray-300 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+              />
+            </div>
+            <div className="flex items-end">
+              <span className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-medium bg-blue-50 text-blue-700">
+                {totalItems} Resource{totalItems !== 1 ? 's' : ''}
               </span>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-md overflow-hidden max-h-[67vh] flex flex-col border">
+        {/* CSV Format Info */}
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-green-800">📋 CSV Upload Format</h3>
+            <button
+              onClick={() => setShowFormatInfo(!showFormatInfo)}
+              className="text-sm text-green-700 hover:text-green-900"
+            >
+              {showFormatInfo ? "Hide Details" : "Show Details"}
+            </button>
+          </div>
+          <div className="grid grid-cols-6 gap-2 text-xs mt-3">
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Name</div>
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Location</div>
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Process Type</div>
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Client</div>
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Geography</div>
+            <div className="bg-white rounded px-2 py-1.5 text-center font-medium border border-green-200">Email ID</div>
+          </div>
+          {showFormatInfo && (
+            <div className="mt-3 p-3 bg-white rounded-lg border border-green-200 text-xs text-gray-700">
+              <p className="mb-2"><strong>Example rows:</strong></p>
+              <code className="block bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+                Rashmi Kottachery,Christus Health,Complete logging,MRO,US,rashmi@valerionhealth.us<br/>
+                Farheen Hasham,Banner Health_Processing,Processing,MRO,US,farheen@valerionhealth.us
+              </code>
+              <ul className="mt-3 space-y-1">
+                <li>• <strong>Process Type:</strong> "Complete logging" maps to "Logging", "Processing" maps to "Processing"</li>
+                <li>• <strong>Location:</strong> Must match exact subproject name in the system</li>
+                <li>• <strong>Upload CSV:</strong> Merges with existing assignments</li>
+                <li>• <strong>Replace CSV:</strong> Replaces all existing assignments for each resource</li>
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Table */}
+        <div className="bg-white rounded-2xl shadow-md overflow-hidden max-h-[55vh] flex flex-col border">
           <div className="overflow-y-auto flex-1">
             <table className="w-full">
-              <thead className="bg-gray-50 z-99 sticky top-0">
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">Resource</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">Assigned Project</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">Sub-Project</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Assignments</th>
+                  <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {isLoading ? (
                   <tr>
-                    <td colSpan="4" className="text-center py-8 text-gray-500">
+                    <td colSpan="5" className="text-center py-8 text-gray-500">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                         <span className="ml-3">Loading resources...</span>
@@ -869,36 +712,46 @@ export default function ResourcesPage() {
                 ) : resources.length > 0 ? (
                   resources.map((res) => (
                     <tr key={res._id} className="hover:bg-gray-50">
-                      <td className="px-6 py-2 whitespace-nowrap">
+                      <td className="px-6 py-3 whitespace-nowrap">
                         <div className="flex items-center">
                           <img 
-                            src={res.avatar_url || "https://storage.googleapis.com/uxpilot-auth.appspot.com/avatars/avatar-0.jpg"} 
+                            src={`https://ui-avatars.com/api/?name=${encodeURIComponent(res.name)}&background=random`} 
                             alt={res.name} 
-                            className="w-8 h-8 rounded-full mr-3" 
+                            className="w-9 h-9 rounded-full mr-3" 
                           />
                           <span className="text-sm font-medium text-gray-900">{res.name}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
-                        <DropdownList items={res.project_names} />
+                      <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-600">
+                        {res.email}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
-                        <DropdownList items={res.subproject_names} />
+                      <td className="px-6 py-3 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">
+                          {res.role || "associate"}
+                        </span>
                       </td>
-                      <td className="px-6 py-2 whitespace-nowrap">
-                        <div className="flex items-center space-x-3">
+                      <td className="px-6 py-3 whitespace-nowrap">
+                        <AssignmentBadge 
+                          assignments={res.assignments}
+                          onClick={() => setViewAssignmentsModal({ isOpen: true, resource: res })}
+                        />
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap">
+                        <div className="flex items-center justify-center space-x-1">
                           <button 
-                            onClick={() => setModalState({ type: "edit", data: res })} 
-                            className="text-primary hover:text-blue-700"
+                            onClick={() => setViewAssignmentsModal({ isOpen: true, resource: res })}
+                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition"
+                            title="View Assignments"
                           >
-                            <PencilSquareIcon className="w-5 h-5" />
+                            <EyeIcon className="w-5 h-5" />
                           </button>
                           <button 
                             onClick={() => { 
                               setConfirmDeleteResource(true); 
                               setResourceId(res._id); 
                             }} 
-                            className="text-red-500 hover:text-red-700"
+                            className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition"
+                            title="Delete"
                           >
                             <TrashIcon className="w-5 h-5" />
                           </button>
@@ -908,7 +761,9 @@ export default function ResourcesPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4" className="text-center py-6 text-gray-500">No resources found.</td>
+                    <td colSpan="5" className="text-center py-8 text-gray-500">
+                      No resources found. Upload a CSV to add resources.
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -922,14 +777,13 @@ export default function ResourcesPage() {
             onConfirm={() => handleDeleteResource(resourceId)} 
           />
 
+          {/* Pagination */}
           <div className="bg-gray-50 border-t border-gray-200 px-6 py-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-700">
-                  Showing <span className="font-medium">{totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}</span> to{" "}
-                  <span className="font-medium">{Math.min(currentPage * itemsPerPage, totalItems)}</span> of{" "}
-                  <span className="font-medium">{totalItems}</span> results
-                </span>
+              <div className="text-sm text-gray-700">
+                Showing <span className="font-medium">{totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}</span> to{" "}
+                <span className="font-medium">{Math.min(currentPage * itemsPerPage, totalItems)}</span> of{" "}
+                <span className="font-medium">{totalItems}</span>
               </div>
               <div className="flex items-center space-x-2">
                 <select 
@@ -945,21 +799,23 @@ export default function ResourcesPage() {
                   <button 
                     onClick={() => handlePageChange(currentPage - 1)} 
                     disabled={currentPage === 1} 
-                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium ${currentPage === 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}`}
+                    className={`inline-flex items-center px-2 py-1.5 rounded-l-md border border-gray-300 bg-white text-sm ${
+                      currentPage === 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'
+                    }`}
                   >
-                    <span className="sr-only">Previous</span>
-                    <ChevronLeftIcon className="h-4 w-4" aria-hidden="true" />
+                    <ChevronLeftIcon className="h-4 w-4" />
                   </button>
-                  <span className="relative inline-flex items-center px-4 py-2 border-t border-b border-gray-300 bg-white text-sm font-medium text-gray-700">
-                    Page {currentPage} of {totalPages}
+                  <span className="inline-flex items-center px-4 py-1.5 border-t border-b border-gray-300 bg-white text-sm text-gray-700">
+                    {currentPage} / {totalPages}
                   </span>
                   <button 
                     onClick={() => handlePageChange(currentPage + 1)} 
-                    disabled={currentPage === totalPages} 
-                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium ${currentPage === totalPages ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'}`}
+                    disabled={currentPage === totalPages || totalPages === 0} 
+                    className={`inline-flex items-center px-2 py-1.5 rounded-r-md border border-gray-300 bg-white text-sm ${
+                      currentPage === totalPages || totalPages === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:bg-gray-50'
+                    }`}
                   >
-                    <span className="sr-only">Next</span>
-                    <ChevronRightIcon className="h-4 w-4" aria-hidden="true" />
+                    <ChevronRightIcon className="h-4 w-4" />
                   </button>
                 </div>
               </div>

@@ -1,40 +1,67 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+// Auth pages
 import LoginPage from "./pages/LoginPage";
-import ProjectPage from "./pages/Project";
+import ResourceLogin from "./pages/resources/ResourceLogin"; // You'll need to create this
+
+// Admin pages with Layout
 import Layout from "./Layout";
+import ProjectPage from "./pages/Project";
 import Productivity from "./pages/Productivity";
-// import Calculator from "./pages/Calculator";
 import Costing from "./pages/Costing";
 import ResourcesPage from "./pages/Resources";
 import MasterDatabase from "./pages/MasterDatabase";
 import Invoices from "./pages/Invoices";
 import SettingsPage from "./pages/Settings";
-import ProtectedRoute from "./ProtectedRoute";
-// import Dashboard from "./pages/Dashboard";
 import BillingDashboard from "./pages/Dashboard";
+
+// Resource pages
+import ResourceDashboard from "./pages/resources/ResourceDashboard";
+
+// Protected route components
+import { AdminRoute, ResourceRoute, HomeRedirect } from "./ProtectedRoute";
 
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* Public route */}
+      {/* Public routes */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/resource-login" element={<ResourceLogin />} />
 
-      {/* Protected routes */}
-      <Route element={<ProtectedRoute />}>
-        <Route element={<Layout />}>
-          {/* <Route path="/" element={<Calculator />} /> */}
-          <Route path="/projects" element={<ProjectPage />} />
-          <Route path="/productivity" element={<Productivity />} />
-          <Route path="/costing" element={<Costing />} />
-          <Route path="/resources" element={<ResourcesPage />} />
-          <Route path="/masterdatabase" element={<MasterDatabase />} />
-          <Route path="/invoices" element={<Invoices />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/" element={<BillingDashboard />} />
-          
-        </Route>
+      {/* Home redirect based on role */}
+      <Route path="/" element={<HomeRedirect />} />
+
+      {/* Admin routes with Layout */}
+      <Route
+        element={
+          <AdminRoute>
+            <Layout />
+          </AdminRoute>
+        }
+      >
+        <Route path="/dashboard" element={<BillingDashboard />} />
+        <Route path="/projects" element={<ProjectPage />} />
+        <Route path="/productivity" element={<Productivity />} />
+        <Route path="/costing" element={<Costing />} />
+        <Route path="/resources" element={<ResourcesPage />} />
+        <Route path="/masterdatabase" element={<MasterDatabase />} />
+        <Route path="/invoices" element={<Invoices />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
+
+      {/* Resource routes */}
+      <Route
+        path="/resource/dashboard"
+        element={
+          <ResourceRoute>
+            <ResourceDashboard />
+          </ResourceRoute>
+        }
+      />
+
+      {/* 404 - Redirect to home */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };

@@ -1,6 +1,6 @@
-// pages/ProjectPage.jsx - COMPLETE UPDATE
+// pages/ProjectPage.jsx - UPDATED with Location Table Pagination
 import { useEffect, useState, useRef, useCallback } from "react";
-import { ChevronDown, ChevronRight, Edit2, Trash2, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronLeft, Edit2, Trash2, Plus } from "lucide-react";
 import CreateGeographyModal from "../components/Project/CreateGeographyModal";
 import CreateClientModal from "../components/Project/CreateClientModal";
 import CreateProjectModal from "../components/CreateProjectModal";
@@ -31,6 +31,7 @@ const ProjectPage = () => {
 
   const [loading, setLoading] = useState(false);
   const [showCsvFormat, setShowCsvFormat] = useState(false);
+  const [showMroCsvFormat, setShowMroCsvFormat] = useState(false);
 
   // Pagination for geographies
   const [currentPage, setCurrentPage] = useState(1);
@@ -63,6 +64,15 @@ const ProjectPage = () => {
     if (!Array.isArray(requestTypes)) return 0;
     const type = requestTypes.find(
       (t) => t.name?.toLowerCase() === typeName.toLowerCase()
+    );
+    return type ? type.rate : 0;
+  };
+
+  // Helper to get rate from requestor types array (MRO)
+  const getRequestorTypeRate = (requestorTypes, typeName) => {
+    if (!Array.isArray(requestorTypes)) return 0;
+    const type = requestorTypes.find(
+      (t) => t.name?.toLowerCase().includes(typeName.toLowerCase())
     );
     return type ? type.rate : 0;
   };
@@ -186,34 +196,41 @@ const ProjectPage = () => {
 
   // ==================== FETCH SUBPROJECTS ====================
   const fetchSubprojects = useCallback(async (projectId, page = 1, append = false) => {
-    const currentCache = subprojectsCache[projectId];
-    if (currentCache?.loading) return;
-
     setSubprojectsCache((prev) => ({
       ...prev,
       [projectId]: {
         ...prev[projectId],
-        data: prev[projectId]?.data || [],
+        data: append ? (prev[projectId]?.data || []) : [],
         loading: true,
         page: page,
         hasMore: prev[projectId]?.hasMore ?? true,
+        totalItems: prev[projectId]?.totalItems || 0,
+        totalPages: prev[projectId]?.totalPages || 1,
       },
     }));
 
     try {
       const response = await axios.get(`${apiUrl}/project/${projectId}/subproject`, {
-        params: { page, limit: 30 },
+        params: { page, limit: 10 },
       });
 
       let subprojectsData = [];
       let hasMore = false;
+      let totalItems = 0;
+      let totalPages = 1;
+      let currentPageNum = page;
 
       if (response.data.pagination) {
         subprojectsData = response.data.data || [];
         hasMore = response.data.pagination.hasMore || false;
+        totalItems = response.data.pagination.totalItems || 0;
+        totalPages = response.data.pagination.totalPages || 1;
+        currentPageNum = response.data.pagination.currentPage || page;
       } else {
         subprojectsData = Array.isArray(response.data) ? response.data : [];
         hasMore = false;
+        totalItems = subprojectsData.length;
+        totalPages = 1;
       }
 
       setSubprojectsCache((prev) => ({
@@ -223,15 +240,29 @@ const ProjectPage = () => {
             ? [...(prev[projectId]?.data || []), ...subprojectsData] 
             : subprojectsData,
           loading: false,
-          page: page,
+          page: currentPageNum,
           hasMore: hasMore,
+          totalItems: totalItems,
+          totalPages: totalPages,
         },
       }));
     } catch (error) {
       console.error("Error fetching subprojects:", error);
       toast.error("Failed to fetch subprojects");
+      setSubprojectsCache((prev) => ({
+        ...prev,
+        [projectId]: {
+          ...prev[projectId],
+          loading: false,
+        },
+      }));
     }
-  }, [apiUrl, subprojectsCache]);
+  }, [apiUrl]);
+
+  // ==================== SUBPROJECT PAGINATION HANDLERS ====================
+  const handleSubprojectPageChange = async (projectId, newPage) => {
+    await fetchSubprojects(projectId, newPage, false);
+  };
 
   // ==================== TOGGLE EXPAND ====================
   const toggleGeography = async (geographyId) => {
@@ -320,7 +351,6 @@ const ProjectPage = () => {
       await axios.delete(`${apiUrl}/client/${clientId}`);
       toast.success("Client deleted");
 
-      // Remove from cache
       setClientsCache((prev) => ({
         ...prev,
         [geographyId]: {
@@ -329,7 +359,6 @@ const ProjectPage = () => {
         },
       }));
 
-      // Update geography's client count
       setGeographies((prev) =>
         prev.map((g) =>
           g._id === geographyId 
@@ -357,7 +386,6 @@ const ProjectPage = () => {
       await axios.delete(`${apiUrl}/project/${projectId}`);
       toast.success("Project deleted");
 
-      // Remove from cache
       setProjectsCache((prev) => ({
         ...prev,
         [clientId]: {
@@ -365,26 +393,6 @@ const ProjectPage = () => {
           data: prev[clientId]?.data?.filter((p) => p._id !== projectId) || [],
         },
       }));
-
-      // Update client's project count
-      setClientsCache((prev) => {
-        const geographyId = Object.keys(prev).find(geoId =>
-          prev[geoId]?.data?.some(c => c._id === clientId)
-        );
-        if (!geographyId) return prev;
-
-        return {
-          ...prev,
-          [geographyId]: {
-            ...prev[geographyId],
-            data: prev[geographyId]?.data?.map((c) =>
-              c._id === clientId 
-                ? { ...c, projectCount: Math.max(0, (c.projectCount || 1) - 1) } 
-                : c
-            ) || [],
-          },
-        };
-      });
     } catch (error) {
       toast.error("Failed to delete project");
     }
@@ -405,12 +413,12 @@ const ProjectPage = () => {
       await axios.delete(`${apiUrl}/project/subproject/${subprojectId}`);
       toast.success("Location deleted");
 
-      // Remove from cache
       setSubprojectsCache((prev) => ({
         ...prev,
         [projectId]: {
           ...prev[projectId],
           data: prev[projectId]?.data?.filter((sp) => sp._id !== subprojectId) || [],
+          totalItems: Math.max(0, (prev[projectId]?.totalItems || 1) - 1),
         },
       }));
     } catch (error) {
@@ -418,7 +426,8 @@ const ProjectPage = () => {
     }
   };
 
-  const handleCSVUpload = async (event) => {
+  // ==================== CSV UPLOADS ====================
+  const handleVerismaCSVUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     if (file.type !== "text/csv") {
@@ -428,7 +437,7 @@ const ProjectPage = () => {
 
     const formData = new FormData();
     formData.append("file", file);
-    toast.loading("Uploading...");
+    toast.loading("Uploading Verisma data...");
 
     try {
       const res = await axios.post(`${apiUrl}/upload/bulk-upload`, formData, {
@@ -452,7 +461,7 @@ const ProjectPage = () => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "bulk-upload-errors.csv";
+        a.download = "verisma-upload-errors.csv";
         a.click();
         toast.dismiss();
         toast.error("Errors found. Check downloaded CSV.");
@@ -460,6 +469,53 @@ const ProjectPage = () => {
       }
       toast.dismiss();
       toast.error("Upload failed.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const handleMROCSVUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.type !== "text/csv") {
+      toast.error("Invalid CSV file");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    toast.loading("Uploading MRO data...");
+
+    try {
+      const res = await axios.post(`${apiUrl}/upload/mro-bulk-upload`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        responseType: "blob",
+      });
+
+      const isJSON = res.headers["content-type"]?.includes("application/json");
+
+      if (isJSON) {
+        const text = await res.data.text();
+        const json = JSON.parse(text);
+        toast.dismiss();
+        toast.success(json.message || "MRO data uploaded successfully!");
+        refreshAll();
+        return;
+      }
+    } catch (err) {
+      if (err?.response?.status === 400 && err.response.headers["content-type"]?.includes("text/csv")) {
+        const blob = err.response.data;
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "mro-upload-errors.csv";
+        a.click();
+        toast.dismiss();
+        toast.error("Errors found. Check downloaded CSV.");
+        return;
+      }
+      toast.dismiss();
+      toast.error("MRO upload failed.");
     } finally {
       event.target.value = "";
     }
@@ -476,6 +532,250 @@ const ProjectPage = () => {
     setCurrentPage(1);
     setHasMoreGeographies(true);
     fetchGeographies(1, false);
+  };
+
+  // ==================== RENDER LOCATION TABLE ====================
+  const renderLocationTable = (subprojects, isMRO, projectName, projectId, subprojectCache) => {
+    const isProcessing = projectName?.toLowerCase() === 'processing';
+    const isLogging = projectName?.toLowerCase() === 'logging';
+    const isPayer = projectName?.toLowerCase().includes('payer');
+
+    const currentPageNum = subprojectCache?.page || 1;
+    const totalPages = subprojectCache?.totalPages || 1;
+    const totalItems = subprojectCache?.totalItems || subprojects.length;
+    const isLoadingPage = subprojectCache?.loading || false;
+
+    // Generate page numbers to display
+    const getPageNumbers = () => {
+      const pages = [];
+      const maxVisiblePages = 5;
+      
+      if (totalPages <= maxVisiblePages) {
+        for (let i = 1; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        if (currentPageNum <= 3) {
+          for (let i = 1; i <= 4; i++) pages.push(i);
+          pages.push('...');
+          pages.push(totalPages);
+        } else if (currentPageNum >= totalPages - 2) {
+          pages.push(1);
+          pages.push('...');
+          for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+        } else {
+          pages.push(1);
+          pages.push('...');
+          for (let i = currentPageNum - 1; i <= currentPageNum + 1; i++) pages.push(i);
+          pages.push('...');
+          pages.push(totalPages);
+        }
+      }
+      return pages;
+    };
+
+    return (
+      <div className="space-y-0">
+        <table className="min-w-full text-xs bg-white">
+          <thead className="bg-gray-200">
+            <tr>
+              <th className="px-4 py-2 text-left font-semibold">Location</th>
+              
+              {/* MRO Processing - Show Requestor Types */}
+              {isMRO && isProcessing ? (
+                <>
+                  <th className="px-4 py-2 text-right font-semibold text-teal-600">NRS-NO Records</th>
+                  <th className="px-4 py-2 text-right font-semibold text-blue-600">Manual</th>
+                  <th className="px-4 py-2 text-right font-semibold text-gray-500">Other Processing</th>
+                  <th className="px-4 py-2 text-right font-semibold text-gray-500">Processed</th>
+                  <th className="px-4 py-2 text-right font-semibold text-gray-500">File Drop</th>
+                </>
+              ) : isMRO && (isLogging || isPayer) ? (
+                /* MRO Logging/Payer - Show Rate */
+                <th className="px-4 py-2 text-right font-semibold text-emerald-600">Rate</th>
+              ) : (
+                /* Verisma - Show Request Types */
+                <>
+                  <th className="px-4 py-2 text-right font-semibold text-blue-600">New Request</th>
+                  <th className="px-4 py-2 text-right font-semibold text-purple-600">Key</th>
+                  <th className="px-4 py-2 text-right font-semibold text-orange-600">Duplicate</th>
+                  <th className="px-4 py-2 text-right font-semibold">Rate</th>
+                </>
+              )}
+              
+              <th className="px-4 py-2 text-center font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoadingPage ? (
+              <tr>
+                <td colSpan={isMRO && isProcessing ? 7 : isMRO && (isLogging || isPayer) ? 3 : 6} className="px-4 py-8 text-center">
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                    <span className="text-gray-500">Loading...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : subprojects.map((sp, spIndex) => {
+              // MRO Requestor Type rates
+              const nrsRate = getRequestorTypeRate(sp.requestor_types, "nrs");
+              const manualRate = getRequestorTypeRate(sp.requestor_types, "manual");
+              const otherRate = getRequestorTypeRate(sp.requestor_types, "other");
+              const processedRate = getRequestorTypeRate(sp.requestor_types, "processed");
+              const fileDropRate = getRequestorTypeRate(sp.requestor_types, "file drop");
+              
+              // Verisma Request Type rates
+              const newReqRate = getRequestTypeRate(sp.request_types, "New Request");
+              const keyRate = getRequestTypeRate(sp.request_types, "Key");
+              const dupRate = getRequestTypeRate(sp.request_types, "Duplicate");
+              
+              const flatRate = sp.rate || sp.flatrate || 0;
+
+              return (
+                <tr
+                  key={sp._id}
+                  className={`${spIndex % 2 === 0 ? "bg-white" : "bg-gray-50"} hover:bg-blue-50 border-b border-gray-200`}
+                >
+                  <td className="px-4 py-2 font-medium">
+                    {sp.name}
+                    {sp.description && (
+                      <div className="text-xs text-gray-500 font-normal">{sp.description}</div>
+                    )}
+                  </td>
+
+                  {/* MRO Processing columns */}
+                  {isMRO && isProcessing ? (
+                    <>
+                      <td className="px-4 py-2 text-right text-teal-700 font-semibold">
+                        {nrsRate > 0 ? `$${nrsRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-blue-700 font-semibold">
+                        {manualRate > 0 ? `$${manualRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-gray-500">
+                        {otherRate > 0 ? `$${otherRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-gray-500">
+                        {processedRate > 0 ? `$${processedRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-gray-500">
+                        {fileDropRate > 0 ? `$${fileDropRate.toFixed(2)}` : "-"}
+                      </td>
+                    </>
+                  ) : isMRO && (isLogging || isPayer) ? (
+                    <td className="px-4 py-2 text-right text-emerald-700 font-semibold">
+                      {flatRate > 0 ? `$${flatRate.toFixed(2)}` : "-"}
+                    </td>
+                  ) : (
+                    <>
+                      <td className="px-4 py-2 text-right">
+                        {newReqRate > 0 ? `$${newReqRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {keyRate > 0 ? `$${keyRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {dupRate > 0 ? `$${dupRate.toFixed(2)}` : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {flatRate > 0 ? `$${flatRate.toFixed(2)}` : "-"}
+                      </td>
+                    </>
+                  )}
+
+                  <td className="px-4 py-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={(e) => handleEditSubProject(sp, selectedProject, e)}
+                        className="p-1 hover:bg-blue-100 rounded text-blue-600"
+                        title="Edit location"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteSubProject(sp._id, sp.project_id, e)}
+                        className="p-1 hover:bg-red-100 rounded text-red-600"
+                        title="Delete location"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 bg-gray-100 border-t">
+            {/* Left: Info */}
+            <div className="text-xs text-gray-600">
+              Showing <span className="font-semibold">{((currentPageNum - 1) * 10) + 1}</span> - <span className="font-semibold">{Math.min(currentPageNum * 10, totalItems)}</span> of <span className="font-semibold">{totalItems}</span> locations
+            </div>
+
+            {/* Right: Pagination Buttons */}
+            <div className="flex items-center gap-1">
+              {/* Previous Button */}
+              <button
+                onClick={() => handleSubprojectPageChange(projectId, currentPageNum - 1)}
+                disabled={currentPageNum === 1 || isLoadingPage}
+                className={`p-1.5 rounded border text-xs font-medium transition ${
+                  currentPageNum === 1 || isLoadingPage
+                    ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400"
+                }`}
+                title="Previous page"
+              >
+                <ChevronLeft size={14} />
+              </button>
+
+              {/* Page Numbers */}
+              {getPageNumbers().map((pageNum, index) => (
+                pageNum === '...' ? (
+                  <span key={`ellipsis-${index}`} className="px-2 text-gray-400 text-xs">...</span>
+                ) : (
+                  <button
+                    key={pageNum}
+                    onClick={() => handleSubprojectPageChange(projectId, pageNum)}
+                    disabled={isLoadingPage}
+                    className={`px-2.5 py-1 rounded border text-xs font-medium transition ${
+                      currentPageNum === pageNum
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400"
+                    } ${isLoadingPage ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    {pageNum}
+                  </button>
+                )
+              ))}
+
+              {/* Next Button */}
+              <button
+                onClick={() => handleSubprojectPageChange(projectId, currentPageNum + 1)}
+                disabled={currentPageNum === totalPages || isLoadingPage}
+                className={`p-1.5 rounded border text-xs font-medium transition ${
+                  currentPageNum === totalPages || isLoadingPage
+                    ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400"
+                }`}
+                title="Next page"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Single page info */}
+        {totalPages === 1 && totalItems > 0 && (
+          <div className="px-4 py-2 bg-gray-50 border-t text-xs text-gray-500">
+            Showing all {totalItems} location{totalItems > 1 ? 's' : ''}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ==================== RENDER ====================
@@ -520,62 +820,108 @@ const ProjectPage = () => {
             <Plus size={20} />
             New Location
           </button>
-
-          <label className="cursor-pointer bg-orange-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-orange-700 transition">
-            <FaUpload size={18} />
-            Upload CSV
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleCSVUpload}
-              className="hidden"
-            />
-          </label>
-
-          <button
-            onClick={() => {
-              const csvHeader = "geography,client,process type,location,request type,rate,flat rate\n";
-              const blob = new Blob([csvHeader], { type: "text/csv;charset=utf-8;" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "project-upload-template.csv";
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="cursor-pointer bg-gray-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-gray-700 transition"
-          >
-            <ArrowDownTrayIcon className="w-5 h-5" />
-            Download Template
-          </button>
-
-          <button
-            onClick={() => setShowCsvFormat(!showCsvFormat)}
-            className="text-gray-600 inline-flex items-center gap-2 hover:text-gray-800 transition"
-          >
-            <FaInfoCircle size={18} />
-            CSV Format Info
-          </button>
         </div>
 
+        {/* Upload Section */}
+        <div className="flex flex-wrap gap-4 items-center p-4 bg-gray-50 rounded-xl border">
+          <span className="text-sm font-semibold text-gray-700">Bulk Upload:</span>
+          
+          {/* Verisma Upload */}
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer bg-indigo-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-indigo-700 transition">
+              <FaUpload size={16} />
+              Verisma CSV
+              <input type="file" accept=".csv" onChange={handleVerismaCSVUpload} className="hidden" />
+            </label>
+            <button
+              onClick={() => setShowCsvFormat(!showCsvFormat)}
+              className="text-indigo-600 hover:text-indigo-800 transition"
+              title="Verisma CSV Format"
+            >
+              <FaInfoCircle size={18} />
+            </button>
+          </div>
+
+          {/* MRO Upload */}
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer bg-green-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-green-700 transition">
+              <FaUpload size={16} />
+              MRO CSV
+              <input type="file" accept=".csv" onChange={handleMROCSVUpload} className="hidden" />
+            </label>
+            <button
+              onClick={() => setShowMroCsvFormat(!showMroCsvFormat)}
+              className="text-green-600 hover:text-green-800 transition"
+              title="MRO CSV Format"
+            >
+              <FaInfoCircle size={18} />
+            </button>
+          </div>
+
+          {/* Download Templates */}
+          <div className="flex items-center gap-2 ml-4 border-l pl-4">
+            <button
+              onClick={() => {
+                const csvContent = "geography,client,process type,location,request type,rate,flat rate\nUS,Verisma,Data Processing,Location A,New Request,3.00,0\nUS,Verisma,Data Processing,Location A,Key,2.50,0\nUS,Verisma,Data Processing,Location A,Duplicate,2.00,0\n";
+                const blob = new Blob([csvContent], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "verisma-template.csv";
+                a.click();
+              }}
+              className="text-indigo-600 border border-indigo-300 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition text-sm"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              Verisma Template
+            </button>
+
+            <button
+              onClick={() => {
+                const csvContent = "geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,file_drop_rate,manual_rate,flatrate\nUS,Fairview Processing,Processing,2.25,0,0,0,3.00,0\nUS,Christus Health,Logging,0,0,0,0,0,1.08\nUS,Payer Location,MRO Payer Project,0,0,0,0,0,2.00\n";
+                const blob = new Blob([csvContent], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "mro-template.csv";
+                a.click();
+              }}
+              className="text-green-600 border border-green-300 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-green-50 transition text-sm"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              MRO Template
+            </button>
+          </div>
+        </div>
+
+        {/* Verisma CSV Format Info */}
         {showCsvFormat && (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 shadow-sm text-sm text-gray-700 animate-fadeIn">
-            <h3 className="font-semibold text-gray-800 mb-2">CSV Upload Format</h3>
-            <pre className="bg-white border border-gray-200 rounded-lg p-3 overflow-x-auto text-sm text-gray-800">
-              geography,client,process type,location,request type,rate,flat rate
-            </pre>
-            <div className="mt-3 space-y-1 text-xs text-gray-600">
-              <p><strong>geography:</strong> Geographic region </p>
-              <p><strong>client:</strong> Client/Organization name</p>
-              <p><strong>process type:</strong> Project/Process name</p>
-              <p><strong>location:</strong> Specific location or sub-division</p>
-              <p><strong>request type:</strong> Must be "New Request", "Key", or "Duplicate"</p>
-              <p><strong>rate:</strong> Rate for the request type</p>
-              <p><strong>flat rate:</strong> Optional flat rate for the location</p>
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 shadow-sm text-sm">
+            <h3 className="font-semibold text-indigo-800 mb-2">📋 Verisma CSV Format</h3>
+            <pre className="bg-white border rounded-lg p-3 overflow-x-auto text-xs">
+geography,client,process type,location,request type,rate,flat rate</pre>
+            <div className="mt-2 text-xs text-gray-600">
+              <strong>Request Types:</strong> New Request, Key, Duplicate
             </div>
-            <div className="mt-3 bg-blue-50 border border-blue-200 rounded p-2 text-xs">
-              <strong>Example:</strong>
-              <pre className="mt-1 text-gray-700">offshore/onshore/MRO,ABC Corp,Data Processing,BRONX Care,New Request,3,4</pre>
+          </div>
+        )}
+
+        {/* MRO CSV Format Info */}
+        {showMroCsvFormat && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 shadow-sm text-sm">
+            <h3 className="font-semibold text-green-800 mb-2">🏥 MRO CSV Format</h3>
+            <pre className="bg-white border rounded-lg p-3 overflow-x-auto text-xs">
+geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,file_drop_rate,manual_rate,flatrate</pre>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-teal-100 rounded p-2">
+                <strong>Process Types:</strong><br/>Processing, Logging, MRO Payer Project
+              </div>
+              <div className="bg-blue-100 rounded p-2">
+                <strong>Request Types:</strong><br/>Batch, DDS, E-link, E-Request, Follow up, New Request
+              </div>
+              <div className="bg-purple-100 rounded p-2">
+                <strong>Requestor Types (Processing):</strong><br/>NRS-NO Records, Other Processing, Processed, File Drop, Manual
+              </div>
             </div>
           </div>
         )}
@@ -585,12 +931,8 @@ const ProjectPage = () => {
       <div className="px-8 pb-4">
         <div className="flex items-center gap-4 text-sm text-gray-600">
           <span>
-            Showing <span className="font-semibold text-gray-900">{geographies.length}</span> of{" "}
-            <span className="font-semibold text-gray-900">{totalGeographies}</span> geographies
+            Showing <span className="font-semibold">{geographies.length}</span> of <span className="font-semibold">{totalGeographies}</span> geographies
           </span>
-          {hasMoreGeographies && !loading && !loadingMore && (
-            <span className="text-blue-600">• Scroll down to load more</span>
-          )}
           {loadingMore && (
             <span className="text-blue-600 flex items-center gap-2">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -600,7 +942,7 @@ const ProjectPage = () => {
         </div>
       </div>
 
-      {/* Main Hierarchical Table */}
+      {/* Main Table */}
       <div className="px-8 pb-8 flex-1 min-h-0">
         {loading && geographies.length === 0 ? (
           <div className="flex justify-center items-center p-12 bg-white rounded-xl border">
@@ -614,7 +956,7 @@ const ProjectPage = () => {
           <div
             ref={scrollContainerRef}
             className="overflow-auto rounded-xl shadow-sm border bg-white"
-            style={{ maxHeight: "calc(100vh - 320px)" }}
+            style={{ maxHeight: "calc(100vh - 420px)" }}
           >
             <table className="min-w-full text-sm">
               <thead className="bg-gray-100 sticky top-0 z-20">
@@ -637,377 +979,137 @@ const ProjectPage = () => {
                       {/* GEOGRAPHY ROW */}
                       <tr
                         key={geography._id}
-                        className={`${
-                          geoIndex % 2 === 0 ? "bg-blue-50" : "bg-blue-100"
-                        } hover:bg-blue-200 cursor-pointer border-b border-blue-200`}
+                        className={`${geoIndex % 2 === 0 ? "bg-blue-50" : "bg-blue-100"} hover:bg-blue-200 cursor-pointer border-b`}
                         onClick={() => toggleGeography(geography._id)}
                       >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            {isGeoExpanded ? (
-                              <ChevronDown size={18} className="text-blue-700" />
-                            ) : (
-                              <ChevronRight size={18} className="text-blue-700" />
-                            )}
+                            {isGeoExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
                             <span className="font-bold text-blue-900">{geography.name}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-gray-700">{geography.description || "—"}</td>
                         <td className="px-6 py-4 text-center">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                              geography.status === "active"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-gray-200 text-gray-700"
-                            }`}
-                          >
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${geography.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-200"}`}>
                             {geography.status}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-center font-semibold text-blue-900">
-                          {geography.clientCount || 0} clients
-                        </td>
+                        <td className="px-6 py-4 text-center font-semibold">{geography.clientCount || 0} clients</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={(e) => handleEditGeography(geography, e)}
-                              className="p-2 hover:bg-blue-300 rounded text-blue-700 transition"
-                            >
-                              <Edit2 size={16} />
-                            </button>
-                            <button
-                              onClick={(e) => handleDeleteGeography(geography._id, e)}
-                              className="p-2 hover:bg-red-200 rounded text-red-600 transition"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            <button onClick={(e) => handleEditGeography(geography, e)} className="p-2 hover:bg-blue-300 rounded"><Edit2 size={16} /></button>
+                            <button onClick={(e) => handleDeleteGeography(geography._id, e)} className="p-2 hover:bg-red-200 rounded text-red-600"><Trash2 size={16} /></button>
                           </div>
                         </td>
                       </tr>
 
-                      {/* CLIENTS UNDER GEOGRAPHY */}
-                      {isGeoExpanded && (
-                        <>
-                          {clientCache?.loading && clients.length === 0 ? (
-                            <tr>
-                              <td colSpan="5" className="px-12 py-4 bg-purple-50">
-                                <div className="flex justify-center">
-                                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                      {/* CLIENTS */}
+                      {isGeoExpanded && clients.map((client, clientIndex) => {
+                        const isClientExpanded = expandedClients[client._id];
+                        const projectCache = projectsCache[client._id];
+                        const projects = projectCache?.data || [];
+                        const isMRO = client.name?.toLowerCase() === 'mro';
+
+                        return (
+                          <>
+                            <tr
+                              key={client._id}
+                              className={`${isMRO ? "bg-green-50 hover:bg-green-100" : "bg-purple-50 hover:bg-purple-100"} cursor-pointer border-b`}
+                              onClick={() => toggleClient(client._id)}
+                            >
+                              <td className="px-12 py-3">
+                                <div className="flex items-center gap-2">
+                                  {isClientExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                  <span className="font-semibold">{isMRO && "🏥 "}{client.name}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-3">{client.description || "—"}</td>
+                              <td className="px-6 py-3 text-center">
+                                <span className={`px-2 py-1 rounded-full text-xs ${client.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-200"}`}>
+                                  {client.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3 text-center font-semibold">{client.projectCount || 0} projects</td>
+                              <td className="px-6 py-3">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button onClick={(e) => handleEditClient(client, geography, e)} className="p-1.5 hover:bg-purple-300 rounded"><Edit2 size={14} /></button>
+                                  <button onClick={(e) => handleDeleteClient(client._id, geography._id, e)} className="p-1.5 hover:bg-red-200 rounded text-red-600"><Trash2 size={14} /></button>
                                 </div>
                               </td>
                             </tr>
-                          ) : clients.length === 0 ? (
-                            <tr>
-                              <td colSpan="5" className="px-12 py-4 bg-purple-50 text-center text-gray-500">
-                                No clients found in this geography
-                              </td>
-                            </tr>
-                          ) : (
-                            clients.map((client, clientIndex) => {
-                              const isClientExpanded = expandedClients[client._id];
-                              const projectCache = projectsCache[client._id];
-                              const projects = projectCache?.data || [];
+
+                            {/* PROJECTS */}
+                            {isClientExpanded && projects.map((project, projectIndex) => {
+                              const isProjectExpanded = expandedProjects[project._id];
+                              const subprojectCache = subprojectsCache[project._id];
+                              const subprojects = subprojectCache?.data || [];
+                              const isProcessing = project.name?.toLowerCase() === 'processing';
+                              const isLogging = project.name?.toLowerCase() === 'logging';
+                              const isPayer = project.name?.toLowerCase().includes('payer');
 
                               return (
                                 <>
-                                  {/* CLIENT ROW */}
                                   <tr
-                                    key={client._id}
-                                    className={`${
-                                      clientIndex % 2 === 0 ? "bg-purple-50" : "bg-purple-100"
-                                    } hover:bg-purple-200 cursor-pointer border-b border-purple-200`}
-                                    onClick={() => toggleClient(client._id)}
+                                    key={project._id}
+                                    className={`${isProcessing ? "bg-teal-50" : isLogging ? "bg-emerald-50" : isPayer ? "bg-amber-50" : "bg-green-50"} hover:bg-green-100 cursor-pointer border-b`}
+                                    onClick={() => {
+                                      toggleProject(project._id);
+                                      setSelectedProject(project);
+                                    }}
                                   >
-                                    <td className="px-12 py-3">
+                                    <td className="px-16 py-3">
                                       <div className="flex items-center gap-2">
-                                        {isClientExpanded ? (
-                                          <ChevronDown size={16} className="text-purple-700" />
-                                        ) : (
-                                          <ChevronRight size={16} className="text-purple-700" />
-                                        )}
-                                        <span className="font-semibold text-purple-900">
-                                           {client.name}
+                                        {isProjectExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                        <span className="font-medium">
+                                          {isProcessing && "📊 "}
+                                          {isLogging && "📝 "}
+                                          {isPayer && "💰 "}
+                                          {project.name}
                                         </span>
                                       </div>
                                     </td>
-                                    <td className="px-6 py-3 text-gray-700">{client.description || "—"}</td>
+                                    <td className="px-6 py-3">{project.description || "—"}</td>
                                     <td className="px-6 py-3 text-center">
-                                      <span
-                                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                          client.status === "active"
-                                            ? "bg-green-100 text-green-700"
-                                            : "bg-gray-200 text-gray-700"
-                                        }`}
-                                      >
-                                        {client.status}
+                                      <span className={`px-2 py-1 rounded-full text-xs ${project.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-200"}`}>
+                                        {project.status}
                                       </span>
                                     </td>
-                                    <td className="px-6 py-3 text-center font-semibold text-purple-900">
-                                      {client.projectCount || 0} projects
-                                    </td>
+                                    <td className="px-6 py-3 text-center font-semibold">{project.subprojectCount || subprojectCache?.totalItems || 0} locations</td>
                                     <td className="px-6 py-3">
                                       <div className="flex items-center justify-center gap-2">
-                                        <button
-                                          onClick={(e) => handleEditClient(client, geography, e)}
-                                          className="p-1.5 hover:bg-purple-300 rounded text-purple-700 transition"
-                                        >
-                                          <Edit2 size={14} />
-                                        </button>
-                                        <button
-                                          onClick={(e) => handleDeleteClient(client._id, geography._id, e)}
-                                          className="p-1.5 hover:bg-red-200 rounded text-red-600 transition"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
+                                        <button onClick={(e) => handleEditProject(project, client, e)} className="p-1.5 hover:bg-green-300 rounded"><Edit2 size={12} /></button>
+                                        <button onClick={(e) => handleDeleteProject(project._id, client._id, e)} className="p-1.5 hover:bg-red-200 rounded text-red-600"><Trash2 size={12} /></button>
                                       </div>
                                     </td>
                                   </tr>
 
-                                  {/* PROJECTS UNDER CLIENT */}
-                                  {isClientExpanded && (
-                                    <>
-                                      {projectCache?.loading && projects.length === 0 ? (
-                                        <tr>
-                                          <td colSpan="5" className="px-16 py-4 bg-green-50">
-                                            <div className="flex justify-center">
-                                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      ) : projects.length === 0 ? (
-                                        <tr>
-                                          <td colSpan="5" className="px-16 py-4 bg-green-50 text-center text-gray-500">
-                                            No projects found for this client
-                                          </td>
-                                        </tr>
-                                      ) : (
-                                        projects.map((project, projectIndex) => {
-                                          const isProjectExpanded = expandedProjects[project._id];
-                                          const subprojectCache = subprojectsCache[project._id];
-                                          const subprojects = subprojectCache?.data || [];
-
-                                          return (
-                                            <>
-                                              {/* PROJECT ROW */}
-                                              <tr
-                                                key={project._id}
-                                                className={`${
-                                                  projectIndex % 2 === 0 ? "bg-green-50" : "bg-green-100"
-                                                } hover:bg-green-200 cursor-pointer border-b border-green-200`}
-                                                onClick={() => toggleProject(project._id)}
-                                              >
-                                                <td className="px-16 py-3">
-                                                  <div className="flex items-center gap-2">
-                                                    {isProjectExpanded ? (
-                                                      <ChevronDown size={14} className="text-green-700" />
-                                                    ) : (
-                                                      <ChevronRight size={14} className="text-green-700" />
-                                                    )}
-                                                    <span className="font-medium text-green-900">
-                                                      {project.name}
-                                                    </span>
-                                                  </div>
-                                                </td>
-                                                <td className="px-6 py-3 text-gray-700">{project.description || "—"}</td>
-                                                <td className="px-6 py-3 text-center">
-                                                  <span
-                                                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                      project.status === "active"
-                                                        ? "bg-green-100 text-green-700"
-                                                        : "bg-gray-200 text-gray-700"
-                                                    }`}
-                                                  >
-                                                    {project.status}
-                                                  </span>
-                                                </td>
-                                                <td className="px-6 py-3 text-center font-semibold text-green-900">
-                                                  {project.subprojectCount || 0} locations
-                                                </td>
-                                                <td className="px-6 py-3">
-                                                  <div className="flex items-center justify-center gap-2">
-                                                    <button
-                                                      onClick={(e) => handleEditProject(project, client, e)}
-                                                      className="p-1.5 hover:bg-green-300 rounded text-green-700 transition"
-                                                    >
-                                                      <Edit2 size={12} />
-                                                    </button>
-                                                    <button
-                                                      onClick={(e) => handleDeleteProject(project._id, client._id, e)}
-                                                      className="p-1.5 hover:bg-red-200 rounded text-red-600 transition"
-                                                    >
-                                                      <Trash2 size={12} />
-                                                    </button>
-                                                  </div>
-                                                </td>
-                                              </tr>
-
-                                              {/* SUBPROJECTS (LOCATIONS) */}
-                                              {isProjectExpanded && (
-                                                <tr>
-                                                  <td colSpan="5" className="px-20 py-4 bg-gray-50">
-                                                    {subprojectCache?.loading && subprojects.length === 0 ? (
-                                                      <div className="flex justify-center py-4">
-                                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-600"></div>
-                                                      </div>
-                                                    ) : subprojects.length === 0 ? (
-                                                      <div className="text-center text-gray-500 py-4">
-                                                        No locations found for this project
-                                                      </div>
-                                                    ) : (
-                                                      <div className="rounded-lg overflow-hidden border border-gray-300">
-                                                        <table className="min-w-full text-xs bg-white">
-                                                          <thead className="bg-gray-200">
-                                                            <tr>
-                                                              <th className="px-4 py-2 text-left font-semibold">
-                                                                Location
-                                                              </th>
-                                                              <th className="px-4 py-2 text-right font-semibold text-blue-600">
-                                                                New Request
-                                                              </th>
-                                                              <th className="px-4 py-2 text-right font-semibold text-purple-600">
-                                                                Key
-                                                              </th>
-                                                              <th className="px-4 py-2 text-right font-semibold text-orange-600">
-                                                                Duplicate
-                                                              </th>
-                                                              <th className="px-4 py-2 text-right font-semibold">
-                                                                Flat Rate
-                                                              </th>
-                                                              {/* <th className="px-4 py-2 text-right font-semibold bg-gray-100">
-                                                                Total Rate
-                                                              </th> */}
-                                                              <th className="px-4 py-2 text-center font-semibold">
-                                                                Actions
-                                                              </th>
-                                                            </tr>
-                                                          </thead>
-                                                          <tbody>
-                                                            {subprojects.map((sp, spIndex) => {
-                                                              const newReqRate = getRequestTypeRate(
-                                                                sp.request_types,
-                                                                "New Request"
-                                                              );
-                                                              const keyRate = getRequestTypeRate(
-                                                                sp.request_types,
-                                                                "Key"
-                                                              );
-                                                              const dupRate = getRequestTypeRate(
-                                                                sp.request_types,
-                                                                "Duplicate"
-                                                              );
-                                                              const flatRate = sp.flatrate || 0;
-                                                              const totalRowRate = newReqRate + keyRate + dupRate;
-
-                                                              return (
-                                                                <tr
-                                                                  key={sp._id}
-                                                                  className={`${
-                                                                    spIndex % 2 === 0
-                                                                      ? "bg-white"
-                                                                      : "bg-gray-50"
-                                                                  } hover:bg-blue-50 border-b border-gray-200`}
-                                                                >
-                                                                  <td className="px-4 py-2 font-medium">
-                                                                    {sp.name}
-                                                                    {sp.description && (
-                                                                      <div className="text-xs text-gray-500 font-normal">
-                                                                        {sp.description}
-                                                                      </div>
-                                                                    )}
-                                                                  </td>
-                                                                  <td className="px-4 py-2 text-right">
-                                                                    {newReqRate > 0
-                                                                      ? `$${newReqRate.toFixed(2)}`
-                                                                      : "-"}
-                                                                  </td>
-                                                                  <td className="px-4 py-2 text-right">
-                                                                    {keyRate > 0
-                                                                      ? `$${keyRate.toFixed(2)}`
-                                                                      : "-"}
-                                                                  </td>
-                                                                  <td className="px-4 py-2 text-right">
-                                                                    {dupRate > 0
-                                                                      ? `$${dupRate.toFixed(2)}`
-                                                                      : "-"}
-                                                                  </td>
-                                                                  <td className="px-4 py-2 text-right">
-                                                                    {flatRate > 0
-                                                                      ? `$${flatRate.toFixed(2)}`
-                                                                      : "-"}
-                                                                  </td>
-                                                                  {/* <td className="px-4 py-2 text-right font-bold bg-gray-50">
-                                                                    ${totalRowRate.toFixed(2)}
-                                                                  </td> */}
-                                                                  <td className="px-4 py-2 text-center">
-                                                                    <div className="flex items-center justify-center gap-1">
-                                                                      <button
-                                                                        onClick={(e) =>
-                                                                          handleEditSubProject(sp, project, e)
-                                                                        }
-                                                                        className="p-1 hover:bg-blue-100 rounded text-blue-600"
-                                                                      >
-                                                                        <Edit2 size={12} />
-                                                                      </button>
-                                                                      <button
-                                                                        onClick={(e) =>
-                                                                          handleDeleteSubProject(
-                                                                            sp._id,
-                                                                            project._id,
-                                                                            e
-                                                                          )
-                                                                        }
-                                                                        className="p-1 hover:bg-red-100 rounded text-red-600"
-                                                                      >
-                                                                        <Trash2 size={12} />
-                                                                      </button>
-                                                                    </div>
-                                                                  </td>
-                                                                </tr>
-                                                              );
-                                                            })}
-                                                          </tbody>
-                                                        </table>
-                                                      </div>
-                                                    )}
-                                                  </td>
-                                                </tr>
-                                              )}
-                                            </>
-                                          );
-                                        })
-                                      )}
-                                    </>
+                                  {/* SUBPROJECTS/LOCATIONS */}
+                                  {isProjectExpanded && (
+                                    <tr>
+                                      <td colSpan="5" className="px-20 py-4 bg-gray-50">
+                                        {subprojectCache?.loading && subprojects.length === 0 ? (
+                                          <div className="flex justify-center py-4">
+                                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-600"></div>
+                                          </div>
+                                        ) : subprojects.length === 0 && !subprojectCache?.loading ? (
+                                          <div className="text-center text-gray-500 py-4">No locations found</div>
+                                        ) : (
+                                          <div className="rounded-lg overflow-hidden border">
+                                            {renderLocationTable(subprojects, isMRO, project.name, project._id, subprojectCache)}
+                                          </div>
+                                        )}
+                                      </td>
+                                    </tr>
                                   )}
                                 </>
                               );
-                            })
-                          )}
-                        </>
-                      )}
+                            })}
+                          </>
+                        );
+                      })}
                     </>
                   );
                 })}
-
-                {/* Loading more geographies */}
-                {loadingMore && (
-                  <tr>
-                    <td colSpan="5" className="py-6 text-center">
-                      <div className="flex justify-center items-center gap-3">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                        <span className="text-gray-500">Loading more geographies...</span>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-
-                {/* End of list */}
-                {!hasMoreGeographies && geographies.length > 0 && !loadingMore && (
-                  <tr>
-                    <td colSpan="5" className="py-4 text-center text-sm text-gray-400">
-                      — End of geographies ({totalGeographies} total) —
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
@@ -1015,82 +1117,22 @@ const ProjectPage = () => {
       </div>
 
       {/* Modals */}
-      <CreateGeographyModal
-        refreshGeographies={refreshAll}
-        isOpen={isCreateGeographyModalOpen}
-        onClose={() => setIsCreateGeographyModalOpen(false)}
-      />
-
-      <CreateClientModal
-        refreshClients={refreshAll}
-        isOpen={isCreateClientModalOpen}
-        onClose={() => setIsCreateClientModalOpen(false)}
-      />
-
-      <CreateProjectModal
-        refreshProjects={refreshAll}
-        isOpen={isCreateProjectModalOpen}
-        onClose={() => setIsCreateProjectModalOpen(false)}
-      />
-
-      <CreateSubProjectModal
-        refreshProjects={refreshAll}
-        isOpen={isCreateSubProjectModalOpen}
-        onClose={() => setIsCreateSubProjectModalOpen(false)}
-      />
+      <CreateGeographyModal refreshGeographies={refreshAll} isOpen={isCreateGeographyModalOpen} onClose={() => setIsCreateGeographyModalOpen(false)} />
+      <CreateClientModal refreshClients={refreshAll} isOpen={isCreateClientModalOpen} onClose={() => setIsCreateClientModalOpen(false)} />
+      <CreateProjectModal refreshProjects={refreshAll} isOpen={isCreateProjectModalOpen} onClose={() => setIsCreateProjectModalOpen(false)} />
+      <CreateSubProjectModal refreshProjects={refreshAll} isOpen={isCreateSubProjectModalOpen} onClose={() => setIsCreateSubProjectModalOpen(false)} />
 
       {isEditGeographyModalOpen && (
-        <EditGeographyModal
-          geography={selectedGeography}
-          refreshGeographies={refreshAll}
-          isOpen={isEditGeographyModalOpen}
-          onClose={() => {
-            setIsEditGeographyModalOpen(false);
-            setSelectedGeography(null);
-          }}
-        />
+        <EditGeographyModal geography={selectedGeography} refreshGeographies={refreshAll} isOpen={isEditGeographyModalOpen} onClose={() => { setIsEditGeographyModalOpen(false); setSelectedGeography(null); }} />
       )}
-
       {isEditClientModalOpen && (
-        <EditClientModal
-          client={selectedClient}
-          geography={selectedGeography}
-          refreshClients={refreshAll}
-          isOpen={isEditClientModalOpen}
-          onClose={() => {
-            setIsEditClientModalOpen(false);
-            setSelectedClient(null);
-            setSelectedGeography(null);
-          }}
-        />
+        <EditClientModal client={selectedClient} geography={selectedGeography} refreshClients={refreshAll} isOpen={isEditClientModalOpen} onClose={() => { setIsEditClientModalOpen(false); setSelectedClient(null); }} />
       )}
-
       {isEditProjectModalOpen && (
-        <EditProjectModal
-          project={selectedProject}
-          client={selectedClient}
-          refreshProjects={refreshAll}
-          isOpen={isEditProjectModalOpen}
-          onClose={() => {
-            setIsEditProjectModalOpen(false);
-            setSelectedProject(null);
-            setSelectedClient(null);
-          }}
-        />
+        <EditProjectModal project={selectedProject} client={selectedClient} refreshProjects={refreshAll} isOpen={isEditProjectModalOpen} onClose={() => { setIsEditProjectModalOpen(false); setSelectedProject(null); }} />
       )}
-
       {isEditSubProjectModalOpen && (
-        <EditSubProjectModal
-          subProject={selectedSubProject}
-          project={selectedProject}
-          refreshProjects={refreshAll}
-          isOpen={isEditSubProjectModalOpen}
-          onClose={() => {
-            setIsEditSubProjectModalOpen(false);
-            setSelectedSubProject(null);
-            setSelectedProject(null);
-          }}
-        />
+        <EditSubProjectModal subProject={selectedSubProject} project={selectedProject} refreshProjects={refreshAll} isOpen={isEditSubProjectModalOpen} onClose={() => { setIsEditSubProjectModalOpen(false); setSelectedSubProject(null); }} />
       )}
     </div>
   );

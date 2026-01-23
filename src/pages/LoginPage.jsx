@@ -22,8 +22,9 @@ const LoginPage = () => {
       // console.log("This is the data: ", data);
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
-      navigate('/');
-    } catch (error) {
+      localStorage.setItem("userType", data.userType);
+      navigate('/dashboard');
+    } catch (error) { 
       console.log("This is the error: ", error);
 
     }

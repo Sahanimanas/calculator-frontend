@@ -1,10 +1,11 @@
-// pages/BillingDashboard.jsx - WITH CLIENT AND GEOGRAPHY FILTER + FIXED EXPORT
+// pages/BillingDashboard.jsx - WITH CLIENT SELECTOR TABS
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
+import VerismaDashboard from './Dashboards/VerismaDashboard';
+import MRODashboard from './Dashboards/MRODashboard';
 
-const apiBaseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000/api';
-
+const apiBaseUrl = import.meta.env.VITE_BACKEND_URL 
 // =============================================
 // HELPER COMPONENTS
 // =============================================
@@ -12,435 +13,78 @@ const apiBaseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000/ap
 const PageHeader = ({ heading, subHeading }) => (
   <div className="p-6 bg-white border-b border-gray-200">
     <h1 className="text-3xl font-extrabold text-gray-900">{heading}</h1>
-    <p className="text-sm text-gray-500 mt-1">{subHeading}</p>
+    {/* <p className="text-sm text-gray-500 mt-1">{subHeading}</p> */}
   </div>
 );
 
-const Loader = ({ message = "Loading..." }) => (
-  <div className="flex flex-col items-center py-10">
-    <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-    <p className="mt-3 text-sm text-gray-500">{message}</p>
-  </div>
-);
+// Client Tab Configuration
+const CLIENT_TABS = [
+  {
+    id: 'verisma',
+    name: 'Verisma',
+    // description: 'Request Type Based Billing (New Request, Key, Duplicate)',
+    color: 'blue'
+  },
+  {
+    id: 'mro',
+    name: 'MRO',
+    // description: 'MRO Billing Dashboard',
+    color: 'green'
+  },
+  // {
+  //   id: 'datavant',
+  //   name: 'Datavant',
+  //   description: 'Datavant Billing Dashboard',
+  //   color: 'purple',
+  //   disabled: true // Coming soon
+  // }
+];
 
-// Async Searchable Select Component with improved text overflow handling
-const AsyncSelect = ({ 
-  value, 
-  onChange, 
-  fetchOptions, 
-  placeholder = "Search...",
-  disabled = false,
-  labelKey = "name",
-  valueKey = "_id"
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [options, setOptions] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedLabel, setSelectedLabel] = useState('');
-  const containerRef = useRef(null);
-  const debounceRef = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen || disabled) return;
-
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
+// Client Tab Button Component
+const ClientTabButton = ({ tab, isActive, onClick }) => {
+  const colorClasses = {
+    blue: {
+      active: 'bg-blue-600 h-6  text-white border-blue-600 shadow-lg',
+      inactive: 'bg-white h-6  text-gray-700 border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+    },
+    green: {
+      active: 'bg-green-600 h-6  text-white border-green-600 shadow-lg',
+      inactive: 'bg-white h-6  text-gray-700 border-gray-300 hover:border-green-400 hover:bg-green-50'
+    },
+    purple: {
+      active: 'bg-purple-600 h-6  text-white border-purple-600 shadow-lg',
+      inactive: 'bg-white h-6  text-gray-700 border-gray-300 hover:border-purple-400 hover:bg-purple-50'
     }
-
-    debounceRef.current = setTimeout(async () => {
-      setIsLoading(true);
-      try {
-        const results = await fetchOptions(search);
-        setOptions(results || []);
-      } catch (error) {
-        console.error('Error fetching options:', error);
-        setOptions([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, [search, isOpen, fetchOptions, disabled]);
-
-  useEffect(() => {
-    if (!value) {
-      setSelectedLabel('');
-      return;
-    }
-    const found = options.find(opt => opt[valueKey] === value);
-    if (found) {
-      setSelectedLabel(found[labelKey]);
-    }
-  }, [value, options, labelKey, valueKey]);
-
-  const handleSelect = (option) => {
-    onChange(option[valueKey]);
-    setSelectedLabel(option[labelKey]);
-    setIsOpen(false);
-    setSearch('');
   };
 
-  const handleClear = (e) => {
-    e.stopPropagation();
-    onChange('');
-    setSelectedLabel('');
-    setSearch('');
-  };
+  const colors = colorClasses[tab.color] || colorClasses.blue;
 
   return (
-    <div ref={containerRef} className="relative">
-      <div
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full px-3 py-2 border rounded-lg flex items-center justify-between cursor-pointer min-h-[42px] ${
-          disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white hover:border-blue-400'
-        }`}
-        title={selectedLabel} // Tooltip for full text
-      >
-        <span className={`flex-1 truncate ${selectedLabel ? 'text-gray-900' : 'text-gray-400'}`}>
-          {selectedLabel || placeholder}
-        </span>
-        <div className="flex items-center space-x-1 flex-shrink-0 ml-2">
-          {value && !disabled && (
-            <button
-              onClick={handleClear}
-              className="text-gray-400 hover:text-red-500 p-1"
-            >
-              ✕
-            </button>
-          )}
-          <span className="text-gray-400">{isOpen ? '▲' : '▼'}</span>
-        </div>
+    <button
+      onClick={() => !tab.disabled && onClick(tab.id)}
+      disabled={tab.disabled}
+      className={`
+        relative px-6 py-3 rounded-lg border-2 transition-all duration-200
+        flex items-center space-x-3 min-w-[180px]
+        ${isActive ? colors.active : colors.inactive}
+        ${tab.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+      `}
+    >
+      <span className="text-2xl">{tab.icon}</span>
+      <div className="text-left">
+        <div className="font-semibold">{tab.name}</div>
+        {tab.disabled && (
+          <span className="text-xs opacity-75">Coming Soon</span>
+        )}
       </div>
-
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-hidden">
-          <div className="p-2 border-b sticky top-0 bg-white">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Type to search..."
-              className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              autoFocus
-            />
-          </div>
-          <div className="max-h-48 overflow-y-auto">
-            {isLoading ? (
-              <div className="p-3 text-center text-gray-500">Loading...</div>
-            ) : options.length === 0 ? (
-              <div className="p-3 text-center text-gray-500">
-                {search ? 'No results found' : 'Start typing to search'}
-              </div>
-            ) : (
-              options.map((option) => (
-                <div
-                  key={option[valueKey]}
-                  onClick={() => handleSelect(option)}
-                  className={`px-3 py-2 cursor-pointer hover:bg-blue-50 ${
-                    option[valueKey] === value ? 'bg-blue-100 text-blue-700' : ''
-                  }`}
-                  title={option[labelKey]} // Tooltip for full text
-                >
-                  <div className="truncate">{option[labelKey]}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+      {isActive && (
+        <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-0 h-0 
+          border-l-8 border-r-8 border-t-8 
+          border-l-transparent border-r-transparent border-t-current"
+          style={{ borderTopColor: tab.color === 'blue' ? '#2563eb' : tab.color === 'green' ? '#16a34a' : '#9333ea' }}
+        />
       )}
-    </div>
-  );
-};
-
-// CSV Format Modal
-const CSVFormatModal = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
-
-  const sampleCSV = `Allocation Date,Name,Request Type,Location,Process Type,Client,Geography
-11/1/2025,John Smith,New Request,Bronx-Care,Verisma Complete Logging,ABC Corp,US
-11/1/2025,Jane Doe,Duplicate,Mumbai Office,Data Processing,XYZ Ltd,IND
-11/2/2025,Bob Johnson,Key,New York Office,Medical Coding,ABC Corp,US`;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6 relative max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4 border-b pb-3">
-          <h2 className="text-xl font-semibold text-gray-900">CSV Upload Format</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Required Columns</h3>
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium text-gray-700">Allocation Date:</div>
-                <div className="text-gray-600">MM/DD/YYYY or YYYY-MM-DD format</div>
-                
-                <div className="font-medium text-gray-700">Name:</div>
-                <div className="text-gray-600">Resource/Employee name</div>
-                
-                <div className="font-medium text-gray-700">Request Type:</div>
-                <div className="text-gray-600">New Request, Key, or Duplicate</div>
-                
-                <div className="font-medium text-gray-700">Location:</div>
-                <div className="text-gray-600">Subproject/Location name</div>
-                
-                <div className="font-medium text-gray-700">Process Type:</div>
-                <div className="text-gray-600">Project/Process name</div>
-                
-                <div className="font-medium text-gray-700">Client:</div>
-                <div className="text-gray-600">Client name from database</div>
-                
-                <div className="font-medium text-gray-700">Geography:</div>
-                <div className="text-gray-600">Exact name from your database</div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Sample CSV Content</h3>
-            <div className="bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto">
-              <pre className="text-xs font-mono whitespace-pre">{sampleCSV}</pre>
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h4 className="font-semibold text-blue-900 mb-2">📝 Important Notes:</h4>
-            <ul className="list-disc list-inside space-y-1 text-sm text-blue-800">
-              <li>Geography, Client, Process Type, and Location must match EXACT names in your database</li>
-              <li>Request Type must be: "New Request", "Key", or "Duplicate"</li>
-              <li>Each row represents one allocation occurrence</li>
-              <li>System will count occurrences and calculate billing based on rates</li>
-              <li>Existing data for the same date range will be replaced</li>
-            </ul>
-          </div>
-
-          <div className="flex justify-end pt-3 border-t">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Got it!
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Upload Modal
-const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
-  const [file, setFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.name.endsWith('.csv')) {
-        setFile(droppedFile);
-      } else {
-        toast.error('Please upload a CSV file');
-      }
-    }
-  };
-
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-    }
-  };
-
-  const handleUpload = async () => {
-    if (!file) {
-      toast.error('Please select a file');
-      return;
-    }
-
-    setUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch(`${apiBaseUrl}/allocation/upload-allocations`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('text/csv')) {
-          const blob = await response.blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'allocation-upload-errors.csv';
-          a.click();
-          toast.error('Upload failed. Check the downloaded error file.');
-          setUploading(false);
-          return;
-        }
-
-        const data = await response.json();
-        throw new Error(data.error || 'Upload failed');
-      }
-
-      const data = await response.json();
-      toast.success(`Successfully uploaded ${data.summary.totalRecords} records!`);
-      onUploadSuccess();
-      onClose();
-      setFile(null);
-
-    } catch (error) {
-      console.error('Upload error:', error);
-      toast.error(error.message || 'Failed to upload file');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative">
-        <div className="flex justify-between items-center mb-4 border-b pb-3">
-          <h2 className="text-xl font-semibold text-gray-900">Upload Allocation Data</h2>
-          <button
-            onClick={onClose}
-            disabled={uploading}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              dragActive 
-                ? 'border-blue-500 bg-blue-50' 
-                : 'border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            
-            <div className="text-6xl mb-3">📄</div>
-            
-            {file ? (
-              <div className="space-y-2">
-                <div className="text-green-600 font-medium">✓ File selected</div>
-                <div className="text-sm text-gray-600">{file.name}</div>
-                <div className="text-xs text-gray-500">
-                  {(file.size / 1024).toFixed(2)} KB
-                </div>
-                <button
-                  onClick={() => setFile(null)}
-                  className="text-sm text-red-600 hover:text-red-700 underline"
-                >
-                  Remove file
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="text-gray-700 font-medium">
-                  Drag and drop your CSV file here
-                </div>
-                <div className="text-sm text-gray-500">or</div>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Browse Files
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-            <div className="text-sm text-yellow-800">
-              <strong>Note:</strong> Uploading will replace existing data for the same date range in the CSV.
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t">
-            <button
-              onClick={onClose}
-              disabled={uploading}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleUpload}
-              disabled={!file || uploading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
-            >
-              {uploading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Uploading...</span>
-                </>
-              ) : (
-                <>
-                  <span>📤</span>
-                  <span>Upload</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </button>
   );
 };
 
@@ -449,592 +93,33 @@ const UploadModal = ({ isOpen, onClose, onUploadSuccess }) => {
 // =============================================
 
 const BillingDashboard = () => {
-  // ALL State declarations
-  const [geographiesData, setGeographiesData] = useState([]);
-  const [clientsData, setClientsData] = useState([]); // For initial load
-  const [projectsData, setProjectsData] = useState([]);
-  const [filters, setFilters] = useState({
-    geography: '',
-    client: '', // Now independent
-    project: '',
-    subProject: '',
-    month: 'all',
-    year: new Date().getFullYear().toString(),
-    startDate: '',
-    endDate: ''
-  });
-  const [searchTerm, setSearchTerm] = useState('');
-  const [dashboardData, setDashboardData] = useState([]);
-  const [totals, setTotals] = useState(null);
-  const [grandTotals, setGrandTotals] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [sortConfig, setSortConfig] = useState({ key: 'location', direction: 'asc' });
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showFormatModal, setShowFormatModal] = useState(false);
-  const [useAllocationData, setUseAllocationData] = useState(true);
-  const [latestUpload, setLatestUpload] = useState(null);
-  const [pagination, setPagination] = useState({
-    currentPage: 1,
-    totalPages: 1,
-    totalItems: 0,
-    itemsPerPage: 50
-  });
+  const [activeClient, setActiveClient] = useState('verisma');
+  const [clientsFromDB, setClientsFromDB] = useState([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(true);
 
-  // Helpers
-  const formatCurrency = (amount) => 
-    new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency: 'USD', 
-      minimumFractionDigits: 2 
-    }).format(amount || 0);
-
-  const formatNumber = (num) => 
-    new Intl.NumberFormat('en-US').format(num || 0);
-
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
-    });
-  };
-
-  // Fetch geographies on mount
-  useEffect(() => {
-    const fetchGeographies = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/geography`);
-        const data = await response.json();
-        setGeographiesData(Array.isArray(data) ? data : data.geographies || []);
-      } catch (error) {
-        console.error("Error fetching geographies:", error);
-      }
-    };
-    fetchGeographies();
-  }, []);
-
-  // Fetch clients when geography changes
+  // Fetch available clients from database (optional - for dynamic client list)
   useEffect(() => {
     const fetchClients = async () => {
-      if (!filters.geography) {
-        setClientsData([]);
-        return;
-      }
-
       try {
-        const response = await fetch(`${apiBaseUrl}/geography/${filters.geography}/client`);
+        const response = await fetch(`${apiBaseUrl}/client`);
         const data = await response.json();
-        setClientsData(Array.isArray(data) ? data : data.clients || []);
+        setClientsFromDB(Array.isArray(data) ? data : data.clients || []);
       } catch (error) {
-        console.error("Error fetching clients:", error);
-        setClientsData([]);
+        console.error('Error fetching clients:', error);
+      } finally {
+        setIsLoadingClients(false);
       }
     };
     fetchClients();
-  }, [filters.geography]);
-
-  // Fetch projects when client changes
-  useEffect(() => {
-    const fetchProjects = async () => {
-      if (!filters.client) {
-        setProjectsData([]);
-        return;
-      }
-
-      try {
-        const response = await fetch(`${apiBaseUrl}/client/${filters.client}/project`);
-        const data = await response.json();
-        setProjectsData(Array.isArray(data) ? data : data.projects || []);
-      } catch (error) {
-        console.error("Error fetching projects:", error);
-        setProjectsData([]);
-      }
-    };
-    fetchProjects();
-  }, [filters.client]);
-
-  // Fetch latest upload info
-  const fetchLatestUpload = useCallback(async () => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/allocation/latest-upload`);
-      const data = await response.json();
-      
-      if (data.upload) {
-        setLatestUpload(data.upload);
-      }
-    } catch (error) {
-      console.error('Error fetching latest upload:', error);
-    }
   }, []);
 
-  useEffect(() => {
-    if (useAllocationData) {
-      fetchLatestUpload();
-    }
-  }, [useAllocationData, fetchLatestUpload]);
-
-  // Fetch subprojects function (async for AsyncSelect)
-  const fetchSubprojects = useCallback(async (search = '') => {
-    if (!filters.project) return [];
-    
-    try {
-      const params = new URLSearchParams({
-        page: '1',
-        limit: '50'
-      });
-      
-      if (search) {
-        params.append('search', search);
-      }
-
-      const response = await fetch(
-        `${apiBaseUrl}/project/${filters.project}/subproject?${params}`
-      );
-      
-      if (!response.ok) throw new Error('Failed to fetch subprojects');
-      
-      const data = await response.json();
-      return Array.isArray(data) ? data : data.data || [];
-    } catch (error) {
-      console.error("Error fetching subprojects:", error);
-      return [];
-    }
-  }, [filters.project]);
-
-  // Fetch clients function (async for AsyncSelect) - NOW INDEPENDENT
-  const fetchClientsAsync = useCallback(async (search = '') => {
-    try {
-      const params = new URLSearchParams();
-      if (search) {
-        params.append('search', search);
-      }
-      // Optionally filter by geography if selected
-      if (filters.geography) {
-        params.append('geography_id', filters.geography);
-      }
-
-      const response = await fetch(
-        `${apiBaseUrl}/client?${params}`
-      );
-      
-      if (!response.ok) throw new Error('Failed to fetch clients');
-      
-      const data = await response.json();
-      return Array.isArray(data) ? data : data.clients || [];
-    } catch (error) {
-      console.error("Error fetching clients:", error);
-      return [];
-    }
-  }, [filters.geography]); // Depends on geography but doesn't require it
-
-  // Fetch projects function (async for AsyncSelect) - ONLY for selected client
-  const fetchProjectsAsync = useCallback(async (search = '') => {
-    // Don't fetch if no client is selected
-    if (!filters.client) {
-      console.log('No client selected, not fetching projects');
-      return [];
-    }
-    
-    try {
-      const params = new URLSearchParams();
-      if (search) {
-        params.append('search', search);
-      }
-
-      console.log(`Fetching projects for client: ${filters.client}`);
-      const response = await fetch(
-        `${apiBaseUrl}/client/${filters.client}/project?${params}`
-      );
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Failed to fetch projects:', response.status, errorText);
-        throw new Error('Failed to fetch projects');
-      }
-      
-      const data = await response.json();
-      console.log('Projects fetched:', data);
-      
-      // Handle response format: { projects: [...], client: {...}, count: 2 }
-      const projects = data.projects || data || [];
-      console.log(`Returning ${projects.length} projects for client`);
-      return projects;
-    } catch (error) {
-      console.error("Error fetching projects:", error);
-      return [];
-    }
-  }, [filters.client]);
-
-  // Clear dependent filters only when their direct parent changes
-  useEffect(() => {
-    // When geography changes, only clear filters that depend on geography chain
-    setFilters(prev => ({ 
-      ...prev, 
-      // Don't clear client - it's independent now
-      // Only clear if project depends on geography directly
-    }));
-  }, [filters.geography]);
-
-  useEffect(() => {
-    // When client changes, clear project and subproject
-    setFilters(prev => ({ ...prev, project: '', subProject: '' }));
-  }, [filters.client]);
-
-  useEffect(() => {
-    // When project changes, clear subproject
-    setFilters(prev => ({ ...prev, subProject: '' }));
-  }, [filters.project]);
-
-  // Fetch billing dashboard data
-  const fetchDashboardData = useCallback(async () => {
-    setIsLoading(true);
-    
-    try {
-      const params = new URLSearchParams({
-        year: filters.year
-      });
-
-      if (filters.month !== 'all') {
-        params.append('month', filters.month);
-      }
-      if (filters.geography) {
-        params.append('geography_id', filters.geography);
-      }
-      if (filters.client) {
-        params.append('client_id', filters.client);
-      }
-      if (filters.project) {
-        params.append('project_id', filters.project);
-      }
-      if (filters.subProject) {
-        params.append('subproject_id', filters.subProject);
-      }
-      if (searchTerm) {
-        params.append('search', searchTerm);
-      }
-
-      const response = await fetch(`${apiBaseUrl}/dashboard/billing-summary?${params}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to fetch dashboard data');
-      }
-
-      setDashboardData(data.data || []);
-      setTotals(data.totals || null);
-
-    } catch (error) {
-      console.error("Error loading dashboard:", error);
-      toast.error(error.message || 'Failed to load dashboard data');
-      setDashboardData([]);
-      setTotals(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filters, searchTerm]);
-
-  // Fetch allocation summary data WITH PAGINATION
-  const fetchAllocationData = useCallback(async (page = 1) => {
-    setIsLoading(true);
-    
-    try {
-      const params = new URLSearchParams({
-        year: filters.year,
-        page: page.toString(),
-        limit: '50'
-      });
-
-      if (filters.month !== 'all') {
-        params.append('month', filters.month);
-      }
-      if (filters.geography) {
-        params.append('geography_id', filters.geography);
-      }
-      if (filters.client) {
-        params.append('client_id', filters.client);
-      }
-      if (filters.project) {
-        params.append('project_id', filters.project);
-      }
-      if (filters.subProject) {
-        params.append('subproject_id', filters.subProject);
-      }
-      if (searchTerm) {
-        params.append('search', searchTerm);
-      }
-      if (filters.startDate) {
-        params.append('start_date', filters.startDate);
-      }
-      if (filters.endDate) {
-        params.append('end_date', filters.endDate);
-      }
-
-      const response = await fetch(`${apiBaseUrl}/allocation/allocation-summary?${params}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to fetch allocation data');
-      }
-
-      setDashboardData(data.data || []);
-      setTotals(data.totals || null);
-      setGrandTotals(data.grandTotals || null);
-      setPagination(data.pagination || {
-        currentPage: 1,
-        totalPages: 1,
-        totalItems: 0,
-        itemsPerPage: 50
-      });
-
-    } catch (error) {
-      console.error("Error loading allocation data:", error);
-      toast.error(error.message || 'Failed to load allocation data');
-      setDashboardData([]);
-      setTotals(null);
-      setGrandTotals(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filters, searchTerm]);
-
-  // Fetch data when filters change
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (useAllocationData) {
-        fetchAllocationData(1);
-      } else {
-        fetchDashboardData();
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [filters, searchTerm, useAllocationData, fetchAllocationData, fetchDashboardData]);
-
-  // Handle filter changes
-  const handleFilterChange = (e) => {
-    const { id, value } = e.target;
-    setFilters(prev => ({
-      ...prev,
-      [id]: value
-    }));
+  const handleClientChange = (clientId) => {
+    setActiveClient(clientId);
+    toast.success(`Switched to ${CLIENT_TABS.find(t => t.id === clientId)?.name} Dashboard`);
   };
 
-  const handleGeographyChange = (value) => {
-    setFilters(prev => ({
-      ...prev,
-      geography: value
-      // Don't clear client - it's independent now
-    }));
-  };
-
-  const handleClientChange = (value) => {
-    setFilters(prev => ({
-      ...prev,
-      client: value,
-      project: '',
-      subProject: ''
-    }));
-  };
-
-  const handleProjectChange = (value) => {
-    setFilters(prev => ({
-      ...prev,
-      project: value,
-      subProject: ''
-    }));
-  };
-
-  const handleSubprojectChange = (value) => {
-    setFilters(prev => ({
-      ...prev,
-      subProject: value
-    }));
-  };
-
-  const handleUploadSuccess = () => {
-    if (useAllocationData) {
-      fetchAllocationData(1);
-      fetchLatestUpload();
-    }
-  };
-
-  // Sorting
-  const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  };
-
-  const sortedData = [...dashboardData].sort((a, b) => {
-    const aVal = a[sortConfig.key];
-    const bVal = b[sortConfig.key];
-    
-    if (typeof aVal === 'string') {
-      return sortConfig.direction === 'asc' 
-        ? aVal.localeCompare(bVal) 
-        : bVal.localeCompare(aVal);
-    }
-    return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-  });
-
-  // Export to CSV - FIXED VERSION
-  const exportToCSV = async () => {
-    const loadingToast = toast.loading('Preparing export...');
-    
-    try {
-      // Build the same parameters as the view
-      const params = new URLSearchParams({
-        year: filters.year,
-        export: 'true' // Flag to skip pagination
-      });
-
-      if (filters.month !== 'all') {
-        params.append('month', filters.month);
-      }
-      if (filters.geography) {
-        params.append('geography_id', filters.geography);
-      }
-      if (filters.client) {
-        params.append('client_id', filters.client);
-      }
-      if (filters.project) {
-        params.append('project_id', filters.project);
-      }
-      if (filters.subProject) {
-        params.append('subproject_id', filters.subProject);
-      }
-      if (searchTerm) {
-        params.append('search', searchTerm);
-      }
-      if (filters.startDate) {
-        params.append('start_date', filters.startDate);
-      }
-      if (filters.endDate) {
-        params.append('end_date', filters.endDate);
-      }
-
-      console.log('Export URL:', `${apiBaseUrl}/allocation/allocation-summary?${params}`);
-
-      const response = await fetch(`${apiBaseUrl}/allocation/allocation-summary?${params}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Export error response:', errorText);
-        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
-      }
-
-      const exportData = await response.json();
-      
-      toast.dismiss(loadingToast);
-      
-      const allData = exportData.data || [];
-      const exportTotals = useAllocationData ? exportData.grandTotals || exportData.totals : exportData.totals;
-
-      if (allData.length === 0) {
-        toast.error('No data to export');
-        return;
-      }
-
-      toast.success(`Exporting ${allData.length} records...`);
-
-      const headers = [
-        'Sr No', 'Locations', 'Process Type', 
-        'Duplicate', 'Total (Duplicate)', 
-        'Key', 'Total (Key)', 
-        'New Request', 'Total (New Request)',
-        'Total Cases/Hours', 'Total Billing', 'Geography'
-      ];
-
-      const rows = allData.map((row, idx) => [
-        idx + 1,
-        row.location || '',
-        row.processType || '',
-        row.duplicateHours || 0,
-        (row.duplicateTotal || 0).toFixed(2),
-        row.keyHours || 0,
-        (row.keyTotal || 0).toFixed(2),
-        row.newRequestHours || 0,
-        (row.newRequestTotal || 0).toFixed(2),
-        row.totalCasesHours || 0,
-        (row.totalBilling || 0).toFixed(2),
-        row.geographyType === 'onshore' ? 'US' : 'IND'
-      ]);
-
-      if (exportTotals) {
-        rows.push([
-          '', 'TOTALS', '',
-          exportTotals.duplicateHours || 0,
-          (exportTotals.duplicateTotal || 0).toFixed(2),
-          exportTotals.keyHours || 0,
-          (exportTotals.keyTotal || 0).toFixed(2),
-          exportTotals.newRequestHours || 0,
-          (exportTotals.newRequestTotal || 0).toFixed(2),
-          exportTotals.totalCasesHours || 0,
-          (exportTotals.totalBilling || 0).toFixed(2),
-          ''
-        ]);
-      }
-
-      // Escape CSV values properly
-      const escapeCSV = (val) => {
-        if (val === null || val === undefined) return '';
-        const str = String(val);
-        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      };
-
-      const csvContent = [
-        headers.map(escapeCSV).join(','),
-        ...rows.map(row => row.map(escapeCSV).join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      
-      const dateRange = filters.startDate && filters.endDate 
-        ? `${filters.startDate}-to-${filters.endDate}`
-        : `${filters.year}-${filters.month !== 'all' ? filters.month : 'all'}`;
-      
-      a.download = `billing-dashboard-${dateRange}-${allData.length}-records.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      
-      toast.success(`Successfully exported ${allData.length} records!`);
-
-    } catch (error) {
-      console.error('Export error:', error);
-      toast.dismiss(loadingToast);
-      toast.error(error.message || 'Failed to export data. Check console for details.');
-    }
-  };
-
-  // Column definitions
-  const columns = [
-    { key: 'srNo', header: 'Sr No', sortable: false, className: 'w-16' },
-    { key: 'location', header: 'Locations', sortable: true, className: 'min-w-[180px]' },
-    { key: 'processType', header: 'Process Type', sortable: true, className: 'min-w-[150px]' },
-    { key: 'duplicateHours', header: 'Duplicate', sortable: true, className: 'w-24 text-right', isNumber: true },
-    { key: 'duplicateTotal', header: 'Total', sortable: true, className: 'w-28 text-right', isCurrency: true },
-    { key: 'keyHours', header: 'Key', sortable: true, className: 'w-24 text-right', isNumber: true },
-    { key: 'keyTotal', header: 'Total', sortable: true, className: 'w-28 text-right', isCurrency: true },
-    { key: 'newRequestHours', header: 'New Request', sortable: true, className: 'w-28 text-right', isNumber: true },
-    { key: 'newRequestTotal', header: 'Total', sortable: true, className: 'w-32 text-right', isCurrency: true },
-    { key: 'totalCasesHours', header: 'Total Cases/Hours', sortable: true, className: 'w-36 text-right', isNumber: true },
-    { key: 'totalBilling', header: 'Total Billing', sortable: true, className: 'w-36 text-right', isCurrency: true },
-    { key: 'geography', header: 'Geography', sortable: true, className: 'w-24 text-center' }
-  ];
+  // Get active tab info
+  const activeTab = CLIENT_TABS.find(t => t.id === activeClient);
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -1043,590 +128,64 @@ const BillingDashboard = () => {
         subHeading="Aggregated view of billing by Geography, Client, Location, Process Type, and Request Type" 
       />
 
-      <div className="p-4 space-y-4">
-        {/* Latest Upload Info Banner */}
-        {useAllocationData && latestUpload && (
-          <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div>
-                  <div className="text-sm font-semibold text-blue-900">
-                    Latest Upload Data Range
-                  </div>
-                  <div className="text-sm text-blue-700">
-                    <span className="font-medium">
-                      {formatDate(latestUpload.start_date)} 
-                    </span>
-                    {' '} to {' '}
-                    <span className="font-medium">
-                      {formatDate(latestUpload.end_date)}
-                    </span>
-                    {' '}
-                    <span className="text-blue-600">
-                      ({latestUpload.total_records} records)
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-blue-600">
-                Uploaded: {new Date(latestUpload.upload_date).toLocaleString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </div>
+      {/* Client Selector Tabs */}
+      <div className="px-6 py-4 bg-gradient-to-r from-gray-100 to-gray-50 border-b">
+        <div className="flex flex-col space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800">Select Client Dashboard</h2>
+              <p className="text-sm text-gray-500">Each client has different billing logic and dashboard view</p>
             </div>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl shadow-md p-4">
-          {/* Data Source Toggle */}
-          <div className="mb-4 flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-            <div className="flex items-center space-x-3">
-              <label className="text-sm font-medium text-gray-700">Data Source:</label>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setUseAllocationData(true)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    useAllocationData
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  Allocation Upload (Count + Billing)
-                </button>
-                <button
-                  onClick={() => setUseAllocationData(false)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    !useAllocationData
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  Billing Data (Hours/Cost)
-                </button>
-              </div>
-            </div>
-
-            {useAllocationData && (
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setShowFormatModal(true)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
-                >
-                  <span>CSV Format</span>
-                </button>
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center space-x-2"
-                >
-                  <span>Upload CSV</span>
-                </button>
+            
+            {/* Quick Stats Badge */}
+            {activeTab && (
+              <div className={`px-4 py-2 rounded-full text-sm font-medium
+                ${activeTab.color === 'blue' ? 'bg-blue-100 text-blue-800' : ''}
+                ${activeTab.color === 'green' ? 'bg-green-100 text-green-800' : ''}
+                ${activeTab.color === 'purple' ? 'bg-purple-100 text-purple-800' : ''}
+              `}>
+                Currently viewing: {activeTab.name}
               </div>
             )}
           </div>
 
-          {/* Filters Grid - WITH CLIENT FILTER */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-4">
-            {/* Geography Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Geography</label>
-              <select
-                id="geography"
-                value={filters.geography}
-                onChange={(e) => handleGeographyChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[42px] truncate"
-                title={geographiesData.find(g => g._id === filters.geography)?.name || 'Select Geography'}
-              >
-                <option value="">All Geographies</option>
-                {geographiesData.map(g => (
-                  <option key={g._id} value={g._id} title={g.name}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Client Filter - NOW INDEPENDENT */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
-              <AsyncSelect
-                value={filters.client}
-                onChange={handleClientChange}
-                fetchOptions={fetchClientsAsync}
-                placeholder="Search clients..."
-                disabled={false} // Always enabled now
-                labelKey="name"
-                valueKey="_id"
+          {/* Client Tab Buttons */}
+          <div className="flex flex-wrap gap-4">
+            {CLIENT_TABS.map(tab => (
+              <ClientTabButton
+                key={tab.id}
+                tab={tab}
+                isActive={activeClient === tab.id}
+                onClick={handleClientChange}
               />
-            </div>
-
-            {/* Project Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Process Type (Project)</label>
-              <AsyncSelect
-                value={filters.project}
-                onChange={handleProjectChange}
-                fetchOptions={fetchProjectsAsync}
-                placeholder={!filters.client ? "Select client first" : "Search projects..."}
-                disabled={!filters.client}
-                labelKey="name"
-                valueKey="_id"
-              />
-            </div>
-
-            {/* Subproject Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Location (Sub-Project)</label>
-              <AsyncSelect
-                value={filters.subProject}
-                onChange={handleSubprojectChange}
-                fetchOptions={fetchSubprojects}
-                placeholder={!filters.project ? "Select project first" : "Search locations..."}
-                disabled={!filters.project}
-                labelKey="name"
-                valueKey="_id"
-              />
-            </div>
-
-            {/* Month Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
-              <select
-                id="month"
-                value={filters.month}
-                onChange={handleFilterChange}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
-              >
-                <option value="all">All Months</option>
-                {Array.from({ length: 12 }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {new Date(0, i).toLocaleString('default', { month: 'long' })}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Year Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-              <select
-                id="year"
-                value={filters.year}
-                onChange={handleFilterChange}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
-              >
-                <option value="2027">2027</option>
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-                <option value="2024">2024</option>
-              </select>
-            </div>
-
-            {/* START DATE FILTER */}
-            {useAllocationData && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                <input
-                  type="date"
-                  id="startDate"
-                  value={filters.startDate}
-                  onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
-                />
-              </div>
-            )}
-
-            {/* END DATE FILTER */}
-            {useAllocationData && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                <input
-                  type="date"
-                  id="endDate"
-                  value={filters.endDate}
-                  onChange={handleFilterChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[42px]"
-                />
-              </div>
-            )}
-
-            {/* Search */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
-              <input
-                type="text"
-                placeholder="Search locations..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[42px]"
-              />
-            </div>
+            ))}
           </div>
 
-          {/* Date Range Display */}
-          {useAllocationData && (filters.startDate || filters.endDate) && (
-            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="flex items-center space-x-2 text-sm text-green-800">
-                <span className="font-semibold">📅 Filtered Date Range:</span>
-                <span>
-                  {filters.startDate || 'Beginning'} to {filters.endDate || 'End'}
-                </span>
-                <button
-                  onClick={() => setFilters(prev => ({ ...prev, startDate: '', endDate: '' }))}
-                  className="ml-auto text-red-600 hover:text-red-800 font-medium"
-                >
-                  Clear Dates
-                </button>
-              </div>
+          {/* Active Client Description */}
+          {/* {activeTab && (
+            <div className={`mt-2 p-3 rounded-lg text-sm
+              ${activeTab.color === 'blue' ? 'bg-blue-50 text-blue-700 border border-blue-200' : ''}
+              ${activeTab.color === 'green' ? 'bg-green-50 text-green-700 border border-green-200' : ''}
+              ${activeTab.color === 'purple' ? 'bg-purple-50 text-purple-700 border border-purple-200' : ''}
+            `}>
+              <span className="font-semibold">Billing Logic:</span> {activeTab.description}
             </div>
-          )}
-
-          {/* Action Bar */}
-          <div className="flex justify-between items-center mt-4 pt-4 border-t">
-            <div className="text-sm text-gray-600">
-              Showing <span className="font-semibold">{sortedData.length}</span> records
-              {useAllocationData && pagination.totalItems > 0 && (
-                <span className="ml-2 text-gray-500">
-                  of {pagination.totalItems} total
-                </span>
-              )}
-            </div>
-            <button
-              onClick={exportToCSV}
-              disabled={sortedData.length === 0 || isLoading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
-            >
-              <span>📥</span>
-              <span>Export CSV</span>
-            </button>
-          </div>
-
-          {/* Pagination Controls */}
-          {useAllocationData && pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-4 border-t">
-              <div className="text-sm text-gray-600">
-                Page {pagination.currentPage} of {pagination.totalPages} 
-                <span className="ml-2">
-                  (Showing {dashboardData.length} of {pagination.totalItems} total records)
-                </span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => fetchAllocationData(1)}
-                  disabled={pagination.currentPage === 1 || isLoading}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  First
-                </button>
-                <button
-                  onClick={() => fetchAllocationData(pagination.currentPage - 1)}
-                  disabled={!pagination.hasPrevPage || isLoading}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                
-                {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
-                  const startPage = Math.max(1, pagination.currentPage - 2);
-                  const pageNum = startPage + i;
-                  if (pageNum > pagination.totalPages) return null;
-                  
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => fetchAllocationData(pageNum)}
-                      disabled={isLoading}
-                      className={`px-3 py-1 border rounded ${
-                        pagination.currentPage === pageNum
-                          ? 'bg-blue-600 text-white'
-                          : 'hover:bg-gray-100'
-                      } disabled:opacity-50`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                
-                <button
-                  onClick={() => fetchAllocationData(pagination.currentPage + 1)}
-                  disabled={!pagination.hasNextPage || isLoading}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
-                <button
-                  onClick={() => fetchAllocationData(pagination.totalPages)}
-                  disabled={pagination.currentPage === pagination.totalPages || isLoading}
-                  className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Last
-                </button>
-              </div>
-            </div>
-          )}
+          )} */}
         </div>
+      </div>
 
-        {/* Data Table */}
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-100 border-b">
-                  <th colSpan={3} className="py-2 px-3 text-left text-xs font-bold text-gray-600 uppercase"></th>
-                  <th colSpan={2} className="py-2 px-3 text-center text-xs font-bold text-orange-600 uppercase bg-orange-50 border-l">
-                    Duplicate
-                  </th>
-                  <th colSpan={2} className="py-2 px-3 text-center text-xs font-bold text-purple-600 uppercase bg-purple-50 border-l">
-                    Key
-                  </th>
-                  <th colSpan={2} className="py-2 px-3 text-center text-xs font-bold text-blue-600 uppercase bg-blue-50 border-l">
-                    New Request
-                  </th>
-                  <th colSpan={2} className="py-2 px-3 text-center text-xs font-bold text-green-600 uppercase bg-green-50 border-l">
-                    Totals
-                  </th>
-                  <th className="py-2 px-3 text-center text-xs font-bold text-gray-600 uppercase border-l"></th>
-                </tr>
-                <tr className="bg-gray-50 border-b">
-                  {columns.map((col) => (
-                    <th
-                      key={col.key}
-                      onClick={() => col.sortable && handleSort(col.key)}
-                      className={`py-3 px-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider ${col.className || ''} ${col.sortable ? 'cursor-pointer hover:bg-gray-100' : ''} ${col.key.includes('duplicate') ? 'bg-orange-50/50' : ''} ${col.key.includes('key') && !col.key.includes('duplicate') ? 'bg-purple-50/50' : ''} ${col.key.includes('newRequest') ? 'bg-blue-50/50' : ''} ${col.key.includes('total') && !col.key.includes('duplicate') && !col.key.includes('key') && !col.key.includes('newRequest') ? 'bg-green-50/50' : ''}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>{col.header}</span>
-                        {col.sortable && (
-                          <span className="text-gray-400 ml-1">
-                            {sortConfig.key === col.key 
-                              ? (sortConfig.direction === 'asc' ? '↑' : '↓') 
-                              : '↕'}
-                          </span>
-                        )}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={columns.length}>
-                      <Loader message="Loading dashboard data..." />
-                    </td>
-                  </tr>
-                ) : sortedData.length === 0 ? (
-                  <tr>
-                    <td colSpan={columns.length} className="py-10 text-center">
-                      <div className="text-gray-500">
-                        <div className="text-4xl mb-2">📊</div>
-                        <p className="font-medium">No data found</p>
-                        <p className="text-sm">Try adjusting your filters</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <>
-                    {sortedData.map((row, idx) => (
-                      <tr 
-                        key={`${row.projectId}-${row.subprojectId}-${idx}`} 
-                        className="hover:bg-gray-50 transition-colors"
-                      >
-                        <td className="py-3 px-3 text-sm text-gray-600">
-                          {(pagination.currentPage - 1) * pagination.itemsPerPage + idx + 1}
-                        </td>
-                        <td className="py-3 px-3 text-sm font-medium text-gray-900">{row.location}</td>
-                        <td className="py-3 px-3 text-sm text-gray-700">{row.processType}</td>
-                        
-                        <td className="py-3 px-3 text-sm text-right bg-orange-50/30 font-medium">
-                          {formatNumber(row.duplicateHours)}
-                        </td>
-                        <td className="py-3 px-3 text-sm text-right bg-orange-50/30 text-orange-700 font-semibold">
-                          {formatCurrency(row.duplicateTotal || 0)}
-                        </td>
-                        
-                        <td className="py-3 px-3 text-sm text-right bg-purple-50/30 font-medium">
-                          {formatNumber(row.keyHours)}
-                        </td>
-                        <td className="py-3 px-3 text-sm text-right bg-purple-50/30 text-purple-700 font-semibold">
-                          {formatCurrency(row.keyTotal || 0)}
-                        </td>
-                        
-                        <td className="py-3 px-3 text-sm text-right bg-blue-50/30 font-medium">
-                          {formatNumber(row.newRequestHours)}
-                        </td>
-                        <td className="py-3 px-3 text-sm text-right bg-blue-50/30 text-blue-700 font-semibold">
-                          {formatCurrency(row.newRequestTotal || 0)}
-                        </td>
-                        
-                        <td className="py-3 px-3 text-sm text-right bg-green-50/30 font-bold text-gray-900">
-                          {formatNumber(row.totalCasesHours)}
-                        </td>
-                        <td className="py-3 px-3 text-sm text-right bg-green-50/30 font-bold text-green-700">
-                          {formatCurrency(row.totalBilling || 0)}
-                        </td>
-                        
-                        <td className="py-3 px-3 text-sm text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                            row.geographyType === 'onshore' 
-                              ? 'bg-blue-100 text-blue-800' 
-                              : 'bg-green-100 text-green-800'
-                          }`}>
-                            {row.geographyType === 'onshore' ? 'US' : 'IND'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                    
-                    {totals && (
-                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
-                        <td className="py-4 px-3"></td>
-                        <td className="py-4 px-3 text-sm text-gray-900 uppercase">
-                          {useAllocationData && pagination.totalPages > 1 ? 'Page Total' : 'Grand Total'}
-                        </td>
-                        <td className="py-4 px-3"></td>
-                        
-                        <td className="py-4 px-3 text-sm text-right bg-orange-100">
-                          {formatNumber(totals.duplicateHours)}
-                        </td>
-                        <td className="py-4 px-3 text-sm text-right bg-orange-100 text-orange-800">
-                          {formatCurrency(totals.duplicateTotal || 0)}
-                        </td>
-                        
-                        <td className="py-4 px-3 text-sm text-right bg-purple-100">
-                          {formatNumber(totals.keyHours)}
-                        </td>
-                        <td className="py-4 px-3 text-sm text-right bg-purple-100 text-purple-800">
-                          {formatCurrency(totals.keyTotal || 0)}
-                        </td>
-                        
-                        <td className="py-4 px-3 text-sm text-right bg-blue-100">
-                          {formatNumber(totals.newRequestHours)}
-                        </td>
-                        <td className="py-4 px-3 text-sm text-right bg-blue-100 text-blue-800">
-                          {formatCurrency(totals.newRequestTotal || 0)}
-                        </td>
-                        
-                        <td className="py-4 px-3 text-sm text-right bg-green-100 text-gray-900">
-                          {formatNumber(totals.totalCasesHours)}
-                        </td>
-                        <td className="py-4 px-3 text-sm text-right bg-green-100 text-green-800">
-                          {formatCurrency(totals.totalBilling || 0)}
-                        </td>
-                        
-                        <td className="py-4 px-3"></td>
-                      </tr>
-                    )}
-                  </>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Summary Cards */}
-        {useAllocationData && grandTotals ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-orange-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Duplicate (Total)</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(grandTotals.duplicateHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-orange-600">
-                {formatCurrency(grandTotals.duplicateTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-purple-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Key (Total)</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(grandTotals.keyHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-purple-600">
-                {formatCurrency(grandTotals.keyTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-blue-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">New Request (Total)</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(grandTotals.newRequestHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-blue-600">
-                {formatCurrency(grandTotals.newRequestTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-green-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Grand Total</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(grandTotals.totalCasesHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-green-600">
-                {formatCurrency(grandTotals.totalBilling)}
-              </div>
-            </div>
-          </div>
-        ) : totals && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-orange-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Duplicate</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(totals.duplicateHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-orange-600">
-                {formatCurrency(totals.duplicateTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-purple-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Key</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(totals.keyHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-purple-600">
-                {formatCurrency(totals.keyTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-blue-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">New Request</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(totals.newRequestHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-blue-600">
-                {formatCurrency(totals.newRequestTotal)}
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-md p-4 border-l-4 border-green-500">
-              <div className="text-sm text-gray-500 uppercase tracking-wider">Total Billing</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">
-                {formatNumber(totals.totalCasesHours)} cases
-              </div>
-              <div className="text-lg font-semibold text-green-600">
-                {formatCurrency(totals.totalBilling)}
-              </div>
-            </div>
+      {/* Render Active Dashboard */}
+      <div className="dashboard-content">
+        {activeClient === 'verisma' && <VerismaDashboard />}
+        {activeClient === 'mro' && <MRODashboard />}
+        {activeClient === 'datavant' && (
+          <div className="p-8 text-center">
+            <div className="text-6xl mb-4"></div>
+            <h3 className="text-xl font-semibold text-gray-700">Datavant Dashboard Coming Soon</h3>
+            <p className="text-gray-500 mt-2">This dashboard is currently under development.</p>
           </div>
         )}
       </div>
-
-      {/* Modals */}
-      <UploadModal
-        isOpen={showUploadModal}
-        onClose={() => setShowUploadModal(false)}
-        onUploadSuccess={handleUploadSuccess}
-      />
-      
-      <CSVFormatModal
-        isOpen={showFormatModal}
-        onClose={() => setShowFormatModal(false)}
-      />
     </div>
   );
 };
