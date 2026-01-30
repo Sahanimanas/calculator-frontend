@@ -14,6 +14,7 @@ import { FaUpload, FaInfoCircle } from "react-icons/fa";
 import toast from "react-hot-toast";
 import axios from "axios";
 import { ArrowDownTrayIcon } from "@heroicons/react/24/outline";
+import DeleteGeographyModal from '../components/DeleteGeographyModal';
 
 const ProjectPage = () => {
   const apiUrl = import.meta.env.VITE_BACKEND_URL;
@@ -55,7 +56,8 @@ const ProjectPage = () => {
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedSubProject, setSelectedSubProject] = useState(null);
-
+  
+const [deleteGeographyModal, setDeleteGeographyModal] = useState({ isOpen: false, geography: null });
   const scrollContainerRef = useRef(null);
   const loadingRef = useRef(false);
 
@@ -323,18 +325,11 @@ const ProjectPage = () => {
     setIsEditGeographyModalOpen(true);
   };
 
-  const handleDeleteGeography = async (geographyId, e) => {
-    e.stopPropagation();
-    if (!window.confirm("Delete this geography? This will affect all clients and projects under it.")) return;
-
-    try {
-      await axios.delete(`${apiUrl}/geography/${geographyId}`);
-      toast.success("Geography deleted");
-      refreshAll();
-    } catch (error) {
-      toast.error(error.response?.data?.error || "Failed to delete geography");
-    }
-  };
+  // Update your handleDeleteGeography function
+const handleDeleteGeography = (geography, e) => {
+  e.stopPropagation();
+  setDeleteGeographyModal({ isOpen: true, geography });
+};
 
   const handleEditClient = (client, geography, e) => {
     e.stopPropagation();
@@ -487,7 +482,7 @@ const ProjectPage = () => {
     toast.loading("Uploading MRO data...");
 
     try {
-      const res = await axios.post(`${apiUrl}/upload/mro-bulk-upload`, formData, {
+      const res = await axios.post(`${apiUrl}/mro-upload/mro-bulk-upload-replace`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         responseType: "blob",
       });
@@ -638,9 +633,9 @@ const ProjectPage = () => {
                 >
                   <td className="px-4 py-2 font-medium">
                     {sp.name}
-                    {sp.description && (
+                    {/* {sp.description && (
                       <div className="text-xs text-gray-500 font-normal">{sp.description}</div>
-                    )}
+                    )} */}
                   </td>
 
                   {/* MRO Processing columns */}
@@ -788,7 +783,7 @@ const ProjectPage = () => {
 
       {/* Action Buttons */}
       <div className="p-8 flex flex-col gap-4">
-        <div className="flex flex-wrap gap-4 items-center">
+        {/* <div className="flex flex-wrap gap-4 items-center">
           <button
             onClick={() => setIsCreateGeographyModalOpen(true)}
             className="bg-blue-600 text-white inline-flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-blue-700 transition"
@@ -820,7 +815,7 @@ const ProjectPage = () => {
             <Plus size={20} />
             New Location
           </button>
-        </div>
+        </div> */}
 
         {/* Upload Section */}
         <div className="flex flex-wrap gap-4 items-center p-4 bg-gray-50 rounded-xl border">
@@ -897,7 +892,7 @@ const ProjectPage = () => {
         {/* Verisma CSV Format Info */}
         {showCsvFormat && (
           <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 shadow-sm text-sm">
-            <h3 className="font-semibold text-indigo-800 mb-2">📋 Verisma CSV Format</h3>
+            <h3 className="font-semibold text-indigo-800 mb-2"> Verisma CSV Format</h3>
             <pre className="bg-white border rounded-lg p-3 overflow-x-auto text-xs">
 geography,client,process type,location,request type,rate,flat rate</pre>
             <div className="mt-2 text-xs text-gray-600">
@@ -909,7 +904,7 @@ geography,client,process type,location,request type,rate,flat rate</pre>
         {/* MRO CSV Format Info */}
         {showMroCsvFormat && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 shadow-sm text-sm">
-            <h3 className="font-semibold text-green-800 mb-2">🏥 MRO CSV Format</h3>
+            <h3 className="font-semibold text-green-800 mb-2">MRO CSV Format</h3>
             <pre className="bg-white border rounded-lg p-3 overflow-x-auto text-xs">
 geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,file_drop_rate,manual_rate,flatrate</pre>
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
@@ -1020,7 +1015,7 @@ geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,fi
                               <td className="px-12 py-3">
                                 <div className="flex items-center gap-2">
                                   {isClientExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                  <span className="font-semibold">{isMRO && "🏥 "}{client.name}</span>
+                                  <span className="font-semibold">{isMRO && ""}{client.name}</span>
                                 </div>
                               </td>
                               <td className="px-6 py-3">{client.description || "—"}</td>
@@ -1061,9 +1056,9 @@ geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,fi
                                       <div className="flex items-center gap-2">
                                         {isProjectExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                         <span className="font-medium">
-                                          {isProcessing && "📊 "}
-                                          {isLogging && "📝 "}
-                                          {isPayer && "💰 "}
+                                          {isProcessing && ""}
+                                          {isLogging && ""}
+                                          {isPayer && ""}
                                           {project.name}
                                         </span>
                                       </div>
@@ -1134,6 +1129,15 @@ geography,location,process_type,nrs_rate,other_processing_rate,processed_rate,fi
       {isEditSubProjectModalOpen && (
         <EditSubProjectModal subProject={selectedSubProject} project={selectedProject} refreshProjects={refreshAll} isOpen={isEditSubProjectModalOpen} onClose={() => { setIsEditSubProjectModalOpen(false); setSelectedSubProject(null); }} />
       )}
+      <DeleteGeographyModal
+  isOpen={deleteGeographyModal.isOpen}
+  onClose={() => setDeleteGeographyModal({ isOpen: false, geography: null })}
+  geography={deleteGeographyModal.geography}
+  onDeleteSuccess={() => {
+    refreshAll(); // Your existing refresh function
+    setDeleteGeographyModal({ isOpen: false, geography: null });
+  }}
+/>
     </div>
   );
 };

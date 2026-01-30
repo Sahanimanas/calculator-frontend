@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 // Auth pages
 import LoginPage from "./pages/LoginPage";
-import ResourceLogin from "./pages/resources/ResourceLogin"; // You'll need to create this
+import ResourceLogin from "./pages/resources/ResourceLogin";
 
 // Admin pages with Layout
 import Layout from "./Layout";
@@ -20,7 +20,8 @@ import BillingDashboard from "./pages/Dashboard";
 import ResourceDashboard from "./pages/resources/ResourceDashboard";
 
 // Protected route components
-import { AdminRoute, ResourceRoute, HomeRedirect } from "./ProtectedRoute";
+import { AdminRoute, HomeRedirect } from "./components/ProtectedRoute";
+import ResourceRoute from "./components/ResourceRoute"; // Use the new one with session timeout
 
 const AppRoutes = () => {
   return (
@@ -50,7 +51,7 @@ const AppRoutes = () => {
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
-      {/* Resource routes */}
+      {/* Resource routes - ResourceRoute handles everything internally */}
       <Route
         path="/resource/dashboard"
         element={

@@ -1,67 +1,53 @@
-// src/components/ProtectedRoute.jsx
-import React from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import React from "react";
+import { Navigate, Outlet } from "react-router-dom";
 
-// For Admin routes
-export const AdminRoute = ({ children }) => {
-  const location = useLocation();
-  const token = localStorage.getItem('token');
-  const userType = localStorage.getItem('userType');
-
-  if (!token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  if (userType !== 'admin') {
-    return <Navigate to="/resource/dashboard" replace />;
-  }
-
-  return children;
+// Helper function to check admin authentication
+const isAdminAuthenticated = () => {
+  const token = localStorage.getItem("token");
+  const userType = localStorage.getItem("userType");
+  return token && userType === "admin";
 };
 
-// For Resource routes
-export const ResourceRoute = ({ children }) => {
-  const location = useLocation();
-  const token = localStorage.getItem('token');
-  const userType = localStorage.getItem('userType');
+// Helper function to check resource authentication
+const isResourceAuthenticated = () => {
+  const token = localStorage.getItem("token");
+  const userType = localStorage.getItem("userType");
+  return token && userType === "resource";
+};
 
-  if (!token) {
-    return <Navigate to="/resource-login" state={{ from: location }} replace />;
+// Admin route protection
+export const AdminRoute = ({ children }) => {
+  if (!isAdminAuthenticated()) {
+    return <Navigate to="/login" replace />;
   }
+  return children ? children : <Outlet />;
+};
 
-  if (userType !== 'resource') {
+// Resource route protection
+export const ResourceRoute = ({ children }) => {
+  if (!isResourceAuthenticated()) {
+    return <Navigate to="/resource-login" replace />;
+  }
+  return children ? children : <Outlet />;
+};
+
+// Home redirect based on role
+export const HomeRedirect = () => {
+  if (isAdminAuthenticated()) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  return children;
-};
-
-// For any authenticated user
-export const AuthenticatedRoute = ({ children }) => {
-  const location = useLocation();
-  const token = localStorage.getItem('token');
-
-  if (!token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  return children;
-};
-
-// Redirect based on user type
-export const HomeRedirect = () => {
-  const token = localStorage.getItem('token');
-  const userType = localStorage.getItem('userType');
-
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (userType === 'resource') {
+  if (isResourceAuthenticated()) {
     return <Navigate to="/resource/dashboard" replace />;
   }
 
-  return <Navigate to="/dashboard" replace />;
+  // Default: redirect to admin login
+  return <Navigate to="/login" replace />;
 };
 
-export default AdminRoute;
+// Default export for backward compatibility
+const ProtectedRoute = () => {
+  return isAdminAuthenticated() ? <Outlet /> : <Navigate to="/login" replace />;
+};
+
+export default ProtectedRoute;

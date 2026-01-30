@@ -10,7 +10,7 @@ import VerismaAllocationPanel from '../../components/resourcesDashboard/Verisma/
 import DatavantAllocationPanel from '../../components/resourcesDashboard/Datavant/DatavantAllocationPanel';
 
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_BACKEND_URL 
 
 const CLIENT_CONFIG = {
   MRO: {
@@ -251,6 +251,7 @@ const ResourceDashboard = () => {
             </div>
           </div>
         </div>
+      
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-4 space-y-4">

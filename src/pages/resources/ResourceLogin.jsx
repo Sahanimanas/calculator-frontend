@@ -3,11 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_BACKEND_URL 
 
 const ResourceLogin = () => {
   const navigate = useNavigate();
-  const [step, setStep] = useState('email'); // 'email' or 'otp'
+  const [step, setStep] = useState('email'); // 'email' or 'otp'  
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [error, setError] = useState('');
